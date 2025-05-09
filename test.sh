@@ -1,0 +1,1 @@
+python -m scripts.test --path runs/uwavescale_16_ab --input datasets/audioset/wav/test/ --output results/decode/uwavescale_16_md --model_type wnac --model_tag best

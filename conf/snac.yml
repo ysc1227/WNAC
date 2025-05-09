@@ -1,0 +1,25 @@
+$include:
+  - conf/base.yml
+
+WNAC.scale_factor: [0.125, 0.25, 0.5, 1]
+WNAC.wavescale: False
+WNAC.encoder_rates: [3, 3, 7, 7]
+WNAC.decoder_rates: [7, 7, 3, 3]
+WNAC.codebook_size: 4096
+WNAC.noise: True
+WNAC.depthwise: True
+WNAC.attn_window_size: 32
+WNAC.pooling: pooling
+
+batch_size: 12
+train/AudioDataset.duration: 0.8
+
+lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  waveform/loss: 0.1
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0
+  vq/aux_loss: 1.0
+

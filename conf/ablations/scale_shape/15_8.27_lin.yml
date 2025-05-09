@@ -1,0 +1,24 @@
+$include:
+  - conf/base.yml
+
+WNAC.scale_factor: [0.03, 0.17, 0.31, 0.45, 0.59, 0.73, 0.87, 1]
+WNAC.phi_kernel: [9, 9, 9, 9, 9, 9]
+WNAC.codebook_dim: 64
+WNAC.wavescale: True
+WNAC.depthwise: True
+WNAC.attn_window_size: 32
+WNAC.noise: True
+
+batch_size: 12
+
+train/AudioDataset.duration: 1
+num_iters: 200000
+
+lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  waveform/loss: 0.1
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0
+  vq/aux_loss: 1.0

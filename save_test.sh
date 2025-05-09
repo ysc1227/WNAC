@@ -1,0 +1,1 @@
+python -m scripts.save_test_set --sample_rate 44100 --output samples/general --args.load conf/base.yml
