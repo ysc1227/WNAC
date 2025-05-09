@@ -41,6 +41,7 @@ torchrun --standalone --master_addr=0.0.0.0 --nproc_per_node=3 -m scripts.train 
 ```
 
 ## Inferencing
+
 Sampling test dataset:
 ```
 python -m scripts.save_test_set --sample_rate 44100 --output samples/general --args.load conf/base.yml
@@ -64,12 +65,17 @@ python -m wnac decode results/encode/wavescale_16/general \
 ```
 
 ## Evaluating
+
 ```
 python -m scripts.eval \
     --input samples/general \
     --output results/decode/wavescale_16/general \
     --n_proc 1 \
 ```
+
+## Acknowledgements
+
+Module definitions are adapted from the [Descript Audio Codec](https://github.com/descriptinc/descript-audio-codec).
 
 # Citation
 ```
