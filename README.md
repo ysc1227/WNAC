@@ -64,10 +64,12 @@ python -m wnac decode results/encode/wavescale_16/general \
 ```
 
 ## Evaluating
+```
 python -m scripts.eval \
     --input samples/general \
     --output results/decode/wavescale_16/general \
     --n_proc 1 \
+```
 
 # Citation
 ```
