@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-<img src="https://github.com/ysc1227/WNAC/assets/architecture.png" width=95%>
+<img src="https://github.com/ysc1227/WNAC/blob/main/assets/architecture.png" width=95%>
 <p>
 
 <br>
