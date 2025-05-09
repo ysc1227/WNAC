@@ -1,0 +1,6 @@
+$include:
+  - conf/base.yml
+
+build_transform.augment_prob: 1.0
+build_transform.augment:
+  - Identity
