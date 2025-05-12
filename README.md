@@ -7,10 +7,6 @@
   <a href="">Wavescale Neural Audio Codec: Bidirectional Multiscale Residual Quantization for High-Fidelity Audio Compression</a>
 </p>
 
-<p align="center">
-<img src="https://github.com/ysc1227/WNAC/blob/main/assets/architecture.png" width=95%>
-<p>
-
 <br>
 
 # Installation
@@ -76,15 +72,3 @@ python -m scripts.eval \
 ## Acknowledgements
 
 Module definitions are adapted from the [Descript Audio Codec](https://github.com/descriptinc/descript-audio-codec).
-
-# Citation
-```
-@misc{qiu2024efficient,
-    title={Wavescale Neural Audio Codec: Bidirectional Multiscale Residual Quantization for High-Fidelity Audio Compression},
-    author={Seungchan Yu, Chanyang Ju, Dongho Lee},
-    year={2025},
-    eprint={},
-    archivePrefix={},
-    primaryClass={}
-}
-```
