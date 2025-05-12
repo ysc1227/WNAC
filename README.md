@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-<img src="main/assets/architecture.png" width=95%>
+<img src="blob/anonymized/assets/architecture.png" width=95%>
 <p>
 
 <br>
