@@ -3,3 +3,5 @@ samples/
 runs/
 **/__pycache__/
 results/
+WNAC.pdf
+compressed.pdf
