@@ -1,4 +1,4 @@
 python -m scripts.eval \
-    --input samples/environment/input \
-    --output results/decode/snac/environment \
-    --n_proc 1 \
+    --input samples/general/input \
+    --output results/decode/res_depth/15_6.04_w/1/general \
+    --n_proc 1

@@ -36,8 +36,8 @@ def compute_fad_with_vggish(recon_dir, org_dir):
     return result
 
 # Example usage
-recon_dir = "results/decode/snac/environment"
-org_dir = "samples/environment/input"
+recon_dir = "results/decode/res_depth/15_6.04_w/1/general"
+org_dir = "samples/general/input"
 
 fad_scores = compute_fad_with_vggish(recon_dir, org_dir)
 print(fad_scores)

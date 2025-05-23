@@ -25,6 +25,7 @@ def decode(
     device: str = "cuda",
     model_type: str = "44khz",
     verbose: bool = False,
+    seed: int = 0
 ):
     """Decode audio from codes.
 
@@ -47,7 +48,7 @@ def decode(
     model_type : str, optional
         The type of model to use. Must be one of "44khz", "24khz", or "16khz". Defaults to "44khz". Ignored if `weights_path` is specified.
     """
-    util.seed(0)
+    util.seed(seed)
     generator = load_model(
         model_type=model_type,
         model_bitrate=model_bitrate,

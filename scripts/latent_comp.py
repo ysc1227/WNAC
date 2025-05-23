@@ -120,9 +120,9 @@ def save_latent_comp(model_loss, model_lengths, model_labels, output_dir):
     for losses, lengths, label in zip(model_loss, model_lengths, model_labels):
         plt.plot(lengths, losses, label=label, marker='o', linewidth=2)
 
-    plt.xlabel("Scale")
-    plt.ylabel("Metric Difference")
-    plt.title("Scale-wise Reconstruction Difference Comparison")
+    plt.xlabel("Scale", fontsize=14)
+    plt.ylabel("Metric Difference", fontsize=14)
+    plt.xticks(fontsize=14)
     plt.grid(True, linestyle="--", alpha=0.6)
     plt.legend()
     

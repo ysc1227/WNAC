@@ -843,7 +843,7 @@ class WavescaleResidualVectorQuantize(nn.Module):
         
         return z_q, codebook_indices, latents, commitment_loss, codebook_loss, aux_loss
 
-    def from_codes(self, codes: list[torch.Tensor], interpolate=True, scale_wise=False):
+    def from_codes(self, codes: list[torch.Tensor], interpolate=True, scale_wise=False, get_f_hat=False):
         """Given the quantized codes, reconstruct the continuous representation
         Parameters
         ----------
@@ -867,12 +867,35 @@ class WavescaleResidualVectorQuantize(nn.Module):
             if interpolate:
                 z_q_i = quantizer.out_proj(z_p_i)
                 z_q = z_q + z_q_i
-            if scale_wise:
-                z_scale_wise.append(z_q)
                 
+            if scale_wise:
+                if get_f_hat:
+                    if i < len(self.scale_factors) - 1:
+                        z_scale_wise.append(F.interpolate(z_q, size=int(T * self.scale_factors[i+1]), mode='area').transpose(1, 2))
+                    else: break
+                else:
+                    z_scale_wise.append(z_q)
+            
         if scale_wise:
             return z_scale_wise
         return z_q, z_p, codes
+
+    def idx_to_var_input(self, label_list):
+        next_scales = []
+        T = label_list[-1].shape[-1]
+        B = label_list[0].shape[0]
+        C = self.quantizers[0].out_proj.out_channels
+        SN = len(self.scale_factors)
+
+        with torch.autocast(device_type=label_list[0].device.type, enabled=False):
+            f_hat = label_list[0].new_zeros(B, C, T, dtype=torch.float32)
+            pn_next: int = int(self.scale_factors[0] * T)
+            for si in range(SN-1):
+                f_hat.add_(self.quantizers[si].out_proj(self.quantizers[si].decode_code(label_list[si], T, self.quant_resi[si/(SN-1)] if self.quant_resi is not None else None)))
+                pn_next = int(self.scale_factors[si+1] * T)
+                next_scales.append(F.interpolate(f_hat, size=(pn_next), mode='area').view(B, C, -1).transpose(1, 2))
+        
+        return next_scales
 
     def from_latents(self, latents: list[torch.Tensor]):
         """Given the unquantized latents, reconstruct the
@@ -920,12 +943,14 @@ class WavescaleResidualVectorQuantize(nn.Module):
         SN = len(self.scale_factors)
 
         if si != SN-1:
-            h = self.quant_resi[si/(SN-1)](F.interpolate(h_BChw, size=max_scale_size, mode='linear'))     # conv after upsample
-            f_hat.add_(h)
+            h = self.quant_resi[si/(SN-1)](F.interpolate(h_BChw, size=max_scale_size, mode='linear'))
+            h_out = self.quantizers[si].out_proj(h)
+            f_hat.add_(h_out)
             return f_hat, F.interpolate(f_hat, size=int(self.scale_factors[si+1] * max_scale_size), mode='area')
         else:
             h = self.quant_resi[si/(SN-1)](h_BChw)
-            f_hat.add_(h)
+            h_out = self.quantizers[si].out_proj(h)
+            f_hat.add_(h_out)
             return f_hat, f_hat
     
     def _compute_wavescale(self, scale_factors):
