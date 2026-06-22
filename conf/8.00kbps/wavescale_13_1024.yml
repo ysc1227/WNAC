@@ -1,0 +1,50 @@
+$include:
+  - conf/base.yml
+
+# DAC 44.1kHz 8kbps comparison setting.
+#
+# EMAC/WNAC uses hop_length = prod([2, 4, 8, 8]) = 512, so the latent
+# frame rate is 44100 / 512 ~= 86.13 Hz. With codebook_size=1024
+# (10 bits/token), matching DAC's nominal 8kbps requires an effective
+# scale sum close to 9:
+#   44100 / 512 * 10 * 9.30 ~= 8.01 kbps
+#
+# Because use_wavescale=True expands base scales as:
+#   scale_factor[::-1] + scale_factor[1:]
+# the actual 13-stage schedule becomes:
+#   [1.0, 0.85, 0.80, 0.70, 0.60, 0.50, 0.40,
+#    0.50, 0.60, 0.70, 0.80, 0.85, 1.0]
+EMAC.scale_factor: [0.30, 0.44, 0.58, 0.72, 0.84, 0.92, 1.00]
+EMAC.use_wavescale: True
+
+# Match DAC's codebook cardinality for fair 8kbps comparison.
+EMAC.codebook_size: 1024
+EMAC.codebook_dim: 8
+
+# Keep the DAC/EMAC encoder-decoder backbone specification.
+EMAC.encoder_rates: [2, 4, 8, 8]
+EMAC.decoder_rates: [8, 8, 4, 2]
+EMAC.decoder_dim: 1536
+EMAC.depthwise: False
+EMAC.noise: False
+
+Discriminator.fft_sizes: [2048, 1024, 512]
+
+batch_size: 24
+num_iters: 250000
+EMAC.quantizer_dropout: 0.0
+EMAC.quantizer_dropout_mode: symmetric_shell
+
+# DAC trains on 0.38s excerpts in the paper; keep this for the cleanest
+# recipe-level comparison. Increase to 1.0 only if you intentionally want to
+# match the longer WNAC training configs instead of DAC's recipe.
+train/AudioDataset.duration: 1
+
+lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  waveform/loss: 0.1
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0
+  vq/aux_loss: 0.0

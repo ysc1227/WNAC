@@ -1,0 +1,27 @@
+# Local host-path eval export config.
+# Exports 3000 clips for each domain by default:
+#   speech, music, environment, general (= speech + music + environment mix)
+
+sample_rate: 44100
+output: /home/seungchan/emac/eval_set
+samples_per_domain: 3000
+duration: 10.0
+
+test/AudioDataset.duration: 10.0
+test/build_transform.augment_prob: 1.0
+
+build_transform.preprocess:
+  - VolumeNorm
+  - RescaleAudio
+build_transform.augment:
+  - Identity
+build_transform.postprocess:
+  - Identity
+
+test/build_dataset.folders:
+  speech_hq:
+    - /home/seungchan/datasets/audio/daps/test
+  music_hq:
+    - /home/seungchan/datasets/audio/musdb/test
+  environment:
+    - /home/seungchan/datasets/audio/audioset/val

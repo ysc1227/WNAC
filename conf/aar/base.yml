@@ -1,0 +1,86 @@
+AAR.input_dim: 512
+AAR.frame_size: auto
+AAR.use_offset: False
+
+# Optimization
+AdamW.betas: [0.8, 0.99]
+AdamW.lr: 0.0001
+ExponentialLR.gamma: 0.999996
+
+amp: false
+val_batch_size: 8
+device: cuda
+num_iters: 250000
+save_iters: [10000, 19000, 50000, 100000, 200000]
+valid_freq: 1000
+sample_freq: 10000
+num_workers: 12
+val_idx: [0, 1, 2, 3, 4, 5, 6, 7]
+seed: 0
+use_ema: False
+ema_decay: 0.9999
+
+VolumeNorm.db: [const, -16]
+
+# Transforms
+build_transform.preprocess:
+  - VolumeNorm
+  - RescaleAudio
+build_transform.augment:
+  - Identity
+build_transform.postprocess:
+  - Identity
+
+
+# Data
+batch_size: 8
+train/AudioDataset.duration: 10
+train/AudioDataset.n_examples: 10000000
+
+val/AudioDataset.duration: 10
+val/build_transform.augment_prob: 1.0
+val/AudioDataset.n_examples: 250
+
+test/AudioDataset.duration: 10.0
+test/build_transform.augment_prob: 1.0
+test/AudioDataset.n_examples: 1000
+
+AudioLoader.shuffle: true
+AudioDataset.without_replacement: true
+
+train/build_dataset.folders:
+  speech_fb:
+    - /data/daps/train
+  speech_hq:
+    - /data/vctk
+    - /data/datasets_fullband/vocalset
+    - /data/datasets_fullband/read_speach
+    - /data/datasets_fullband/french_speech
+  speech_uq:
+    - /data/datasets_fullband/emotional_speech
+    - /data/common_voice
+    - /data/datasets_fullband/german_speech
+    - /data/datasets_fullband/russian_speech
+    - /data/datasets_fullband/spanish_speech
+  music_hq:
+    - /data/musdb/train
+  music_uq:
+    - /data/jamendo
+  general:
+    - /data/audioset/train
+
+val/build_dataset.folders:
+  speech_hq:
+    - /data/daps/val
+  music_hq:
+    - /data/musdb/test
+  general:
+    - /data/audioset/val
+
+test/build_dataset.folders:
+  speech_hq:
+    - /data/daps/test
+  music_hq:
+    - /data/musdb/test
+  general:
+    - /data/audioset/val

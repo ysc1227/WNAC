@@ -1,0 +1,15 @@
+argbind>=0.3.7
+descript-audiotools>=0.7.2
+einops
+numpy
+torch
+torchaudio==2.8
+tqdm
+tensorboard
+numba>=0.5.7
+jupyterlab
+transformers
+panns_inference
+torcheval
+visqol-python
+torchvggish==0.2

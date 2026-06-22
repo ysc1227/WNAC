@@ -1,0 +1,23 @@
+$include:
+  - conf/base.yml
+
+EMAC.scale_factor: [0.3, 0.45, 0.65, 0.85, 1.0]
+EMAC.codebook_dim: 64
+EMAC.codebook_size: 512
+EMAC.attn_window_size: 32
+EMAC.use_wavescale: False
+
+batch_size: 12
+num_iters: 200000
+EMAC.quantizer_dropout: 0.2
+
+train/AudioDataset.duration: 1.0
+
+lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  waveform/loss: 0.1
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0
+  vq/aux_loss: 0.1

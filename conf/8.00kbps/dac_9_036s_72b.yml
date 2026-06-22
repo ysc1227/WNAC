@@ -1,0 +1,43 @@
+$include:
+  - conf/base.yml
+
+# A: DAC-style single-scale 9-codebook baseline with the original/current MRD.
+#
+# This is the standard DAC-style 44.1kHz comparison point:
+#   hop_length = prod([2, 4, 8, 8]) = 512
+#   44100 / 512 * 10 bits/token * 9 codebooks ~= 7.75 kbps
+# It is kept as the single-scale baseline rather than scale-sum matched to
+# WaveScale, because the method comparison should preserve the DAC quantizer
+# structure.
+EMAC.scale_factor: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+EMAC.use_wavescale: False
+
+EMAC.codebook_size: 1024
+EMAC.codebook_dim: 8
+
+EMAC.encoder_rates: [2, 4, 8, 8]
+EMAC.decoder_rates: [8, 8, 4, 2]
+EMAC.decoder_dim: 1536
+EMAC.depthwise: False
+EMAC.noise: False
+
+Discriminator.fft_sizes: [2048, 1024, 512]
+Discriminator.bands:
+  - [0.0, 0.1]
+  - [0.1, 0.25]
+  - [0.25, 0.5]
+  - [0.5, 0.75]
+  - [0.75, 1.0]
+
+batch_size: 72
+num_iters: 250000
+train/AudioDataset.duration: 0.36
+
+lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  waveform/loss: 0.1
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0
+  vq/aux_loss: 0.0

@@ -1,0 +1,46 @@
+$include:
+  - conf/base.yml
+
+# D: WaveScale 13-stage 8kbps model with high-frequency-enhanced MRD.
+#
+# Compare D - C to test WaveScale under the tuned discriminator.  Compare
+# D - B to measure the extra recipe gain for WaveScale.
+EMAC.scale_factor: [0.25, 0.4712, 0.6048, 0.7177, 0.8189, 0.9124, 1.0]
+EMAC.use_wavescale: True
+
+EMAC.codebook_size: 1024
+EMAC.codebook_dim: 8
+
+EMAC.encoder_rates: [2, 4, 8, 8]
+EMAC.decoder_rates: [8, 8, 4, 2]
+EMAC.decoder_dim: 1536
+EMAC.depthwise: False
+EMAC.noise: False
+EMAC.attn_window_size: 32
+
+# Diagnostic-driven MRD tweak:
+# - add a 256-sample STFT window for short high-frequency detail
+# - split the top octave more finely around 16 kHz+
+Discriminator.fft_sizes: [2048, 1024, 512, 256]
+Discriminator.bands:
+  - [0.0, 0.1]
+  - [0.1, 0.25]
+  - [0.25, 0.5]
+  - [0.5, 0.725]
+  - [0.725, 0.875]
+  - [0.875, 1.0]
+
+batch_size: 24
+num_iters: 250000
+EMAC.quantizer_dropout: 0.0
+EMAC.quantizer_dropout_mode: symmetric_shell
+train/AudioDataset.duration: 1
+
+lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  waveform/loss: 0.1
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0
+  vq/aux_loss: 0.0

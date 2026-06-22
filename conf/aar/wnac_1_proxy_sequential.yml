@@ -1,0 +1,80 @@
+AAR.input_dim: 512
+AAR.frame_size: auto
+AAR.aln: 1
+AAR.aln_gamma_init: 1e-3
+AAR.shared_aln: False
+AAR.use_scale_order: False
+AAR.use_blockwise: False
+
+# Proxy comparison config for direction finding, not paper-scale training.
+# Original sequential baseline: same short-run settings as blockwise proxy, but
+# without wavescale effective-scale reordering or same-scale block grouping.
+
+# Optimization
+AdamW.betas: [0.8, 0.99]
+AdamW.lr: 0.0001
+AdamW.weight_decay: 0.05
+
+WarmupLin0LR.peak_lr: 0.0001
+WarmupLin0LR.wp_ratio: 0.03
+WarmupLin0LR.wd: 0.05
+WarmupLin0LR.wd_end: 0
+WarmupLin0LR.wp0: 0.005
+WarmupLin0LR.wpe: 0.01
+
+amp: false
+val_batch_size: 16
+device: cuda
+num_iters: 30000
+save_iters: [10000, 20000, 30000]
+valid_freq: 500
+sample_freq: 5000
+num_workers: 12
+val_idx: [0, 1, 2, 3, 4, 5, 6, 7]
+seed: 0
+duration: 1
+use_ema: False
+ema_decay: 0.9999
+vae_path: runs/2.52kbps/5_512/best/emac/weights.pth
+
+VolumeNorm.db: [const, -16]
+
+# Transforms
+build_transform.preprocess:
+  - Identity
+build_transform.augment_prob: 0.2
+build_transform.augment:
+  - NoiseFloor
+  - ShiftPhase
+  - Equalizer
+build_transform.postprocess:
+  - VolumeNorm
+  - RescaleAudio
+
+# Data: keep full train stream; shorten update budget instead of shrinking data.
+batch_size: 16
+train/AudioDataset.duration: 10
+train/AudioDataset.n_examples: 10000000
+
+val/AudioDataset.duration: 10
+val/build_transform.augment_prob: 1.0
+val/AudioDataset.n_examples: 1000
+
+test/AudioDataset.duration: 10
+test/build_transform.augment_prob: 1.0
+test/AudioDataset.n_examples: 1000
+
+AudioLoader.shuffle: true
+AudioDataset.without_replacement: true
+
+train/build_dataset.folders:
+  general:
+    - /data/audioset/train
+
+val/build_dataset.folders:
+  general:
+    - /data/audioset/val
+
+test/build_dataset.folders:
+  general:
+    - /data/audioset/val

@@ -1,0 +1,36 @@
+.env
+.vscode/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python/build artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Local training/evaluation artifacts
+runs/
+results/
+eval_set/
+plot/
+*.pth
+*.pt
+*.ckpt
+*.dac
+*.wav
+*.flac
+*.mp3
+*.npy
+*.npz
+events.out.tfevents.*
+
+# Generated/reference documents
+paper/*.pdf
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

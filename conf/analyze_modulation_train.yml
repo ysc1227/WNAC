@@ -1,0 +1,54 @@
+$include:
+  - conf/base.yml
+
+# Temporal modulation analysis over sampled training clips.
+#
+# This derives WaveScale pivot/scale schedules from the data instead of
+# hand-picking linear/log/quadratic schedules.  It samples train folders through
+# the same AudioDataset stack used by training, but disables stochastic
+# augmentation so the measured modulation spectrum reflects source audio.
+
+source: dataset
+split: train
+output: results/modulation_analysis_train
+
+sample_rate: 44100
+hop_length: 512
+n_fft: 2048
+n_mels: 80
+mod_bin_width: 0.1
+
+n_examples: 9000
+duration: 10.0
+dataset_keys: []
+
+target_sums: [9.0, 9.3]
+n_base_scales: 7
+recommended_schedule_source: top_q75_equalized
+recommended_target_sum: 9.0
+make_plots: true
+domain_outputs: true
+
+audio_groups:
+  - [all, 0.0, 22050.0]
+  - [low_0_1k, 0.0, 1000.0]
+  - [mid_1_4k, 1000.0, 4000.0]
+  - [high_4_12k, 4000.0, 12000.0]
+  - [top_12_22k, 12000.0, 22050.0]
+
+schedule_specs:
+  - dominant_q80_all_equalized:all:equalized:0.80
+  - dominant_q85_all_equalized:all:equalized:0.85
+  - balanced_q80_all_energy:all:energy_weighted:0.80
+  - high_q80_equalized:high_4_12k:equalized:0.80
+  - top_q75_equalized:top_12_22k:equalized:0.75
+
+train/AudioDataset.duration: 10.0
+train/build_transform.augment_prob: 0.0
+train/build_transform.preprocess:
+  - VolumeNorm
+  - RescaleAudio
+train/build_transform.augment:
+  - Identity
+train/build_transform.postprocess:
+  - Identity
