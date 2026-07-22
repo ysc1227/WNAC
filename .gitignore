@@ -1,5 +1,14 @@
+# Local environment and editor state
 .env
+.env.*
+!.env.example
 .vscode/
+.idea/
+
+# Local TeX installation/cache
+.texlive/
+
+# Python caches
 __pycache__/
 *.py[cod]
 *$py.class
@@ -8,6 +17,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.ipynb_checkpoints/
 build/
 dist/
 *.egg-info/
@@ -17,20 +27,65 @@ runs/
 results/
 eval_set/
 plot/
+wandb/
+logs/
+lightning_logs/
+checkpoints/
+outputs/
 *.pth
 *.pt
 *.ckpt
+*.safetensors
+*.onnx
 *.dac
 *.wav
 *.flac
 *.mp3
+*.m4a
+*.ogg
+*.aif
+*.aiff
 *.npy
 *.npz
 events.out.tfevents.*
 
-# Generated/reference documents
-paper/*.pdf
+# Local third-party clones and scratch notes
+external/
+notes/
+
+# Local paper drafts and generated LaTeX artifacts
+paper/
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.nav
+*.out
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+*.vrb
+*.xdv
+
+# Temporary files and packaged artifacts
+*.bak
+*.tmp
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+tmp/
+temp/
 
 # OS/editor noise
 .DS_Store
 Thumbs.db
+*~
+*.swp
+*.swo

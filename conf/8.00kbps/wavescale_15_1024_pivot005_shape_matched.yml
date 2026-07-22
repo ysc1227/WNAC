@@ -1,0 +1,18 @@
+$include:
+  - conf/8.00kbps/wavescale_13_1024.yml
+
+# Shape-matched 0.05-pivot WNAC schedule.
+#
+# This schedule lowers the pivot from the default 0.30 to 0.05, while choosing
+# the number of stages and intermediate scales so that the endpoint-normalized
+# curve closely matches the default 13-stage WNAC shape.
+#
+# With use_wavescale=True, the base schedule below expands to 15 stages:
+#   [1.00, 0.92148, 0.828418, 0.704337, 0.553112, 0.390255, 0.227398, 0.050,
+#    0.227398, 0.390255, 0.553112, 0.704337, 0.828418, 0.92148, 1.00]
+#
+# Sum(expanded scales)=9.30, matching the default 8kbps token budget:
+#   44100 / 512 * log2(1024) * 9.30 ~= 8.01 kbps
+EMAC.scale_factor: [0.05, 0.227398, 0.390255, 0.553112, 0.704337, 0.828418, 0.92148, 1.0]
+EMAC.use_wavescale: True
+EMAC.codebook_size: 1024

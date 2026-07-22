@@ -14,6 +14,8 @@ from .lr_control import filter_params, lr_wd_annealing
 
 
 EMAC = emac.model.EMAC
+SATCodec = emac.model.SATCodec
+SNACCodec = emac.model.SNACCodec
 Accelerator = ml.Accelerator
 
 __MODEL_LATEST_TAGS__ = {
@@ -127,6 +129,27 @@ def load_model(
         load_path = download(
             model_type=model_type, model_bitrate=model_bitrate, tag=tag
         )
+
+    def _load_state_dict_checkpoint(model_cls, kwargs, state_dict, metadata=None):
+        valid_args = set(inspect.signature(model_cls.__init__).parameters.keys()) - {"self"}
+        fixed_kwargs = {k: v for k, v in kwargs.items() if k in valid_args}
+        generator = model_cls(**fixed_kwargs)
+        generator.load_state_dict(state_dict, strict=True)
+        if metadata is not None:
+            metadata = dict(metadata)
+            metadata["kwargs"] = fixed_kwargs
+            generator.metadata = metadata
+        return generator
+
+    def _infer_depthwise_from_state_dict(state_dict):
+        # The first decoder convolution is depthwise-only when depthwise=True.
+        weight = state_dict.get("decoder.model.0.weight_v")
+        if weight is None:
+            weight = state_dict.get("decoder.model.0.weight")
+        if weight is not None and getattr(weight, "ndim", 0) == 3:
+            return int(weight.shape[1]) == 1
+        return None
+
     # Some early Wavescale checkpoints were saved without `use_wavescale` in
     # metadata kwargs even though their state_dict contains the expanded
     # U-shaped quantizer stack.  EMAC.load() then reconstructs a non-wavescale
@@ -136,9 +159,22 @@ def load_model(
     try:
         ckpt = torch.load(load_path, map_location="cpu")
         if isinstance(ckpt, dict) and "state_dict" in ckpt and "metadata" in ckpt:
-            kwargs = ckpt.get("metadata", {}).get("kwargs", {}) or {}
+            metadata = ckpt.get("metadata", {}) or {}
+            kwargs = dict(metadata.get("kwargs", {}) or {})
             scale_factor = kwargs.get("scale_factor", None)
             state_dict = ckpt["state_dict"]
+            state_keys = set(state_dict.keys())
+            inferred_depthwise = _infer_depthwise_from_state_dict(state_dict)
+            metadata_depthwise = kwargs.get("depthwise", None)
+            if inferred_depthwise is not None:
+                kwargs["depthwise"] = bool(inferred_depthwise)
+
+            if "multi_scale" in kwargs or any(k.startswith("quantizer.vq.layers.") for k in state_keys):
+                return _load_state_dict_checkpoint(SATCodec, kwargs, state_dict, metadata)
+
+            if "vq_strides" in kwargs:
+                return _load_state_dict_checkpoint(SNACCodec, kwargs, state_dict, metadata)
+
             quantizer_ids = sorted({
                 int(k.split("quantizer.quantizers.")[1].split(".")[0])
                 for k in state_dict.keys()
@@ -159,6 +195,9 @@ def load_model(
                     fixed_kwargs["use_wavescale"] = bool(kwargs.get("use_wavescale", kwargs.get("wavescale", False)))
                     generator = EMAC(**fixed_kwargs)
                     generator.load_state_dict(state_dict, strict=True)
+                    metadata = dict(metadata)
+                    metadata["kwargs"] = fixed_kwargs
+                    generator.metadata = metadata
                     return generator
 
             expected_wavescale = len(scale_factor) * 2 - 1 if scale_factor is not None else None
@@ -171,7 +210,13 @@ def load_model(
                 fixed_kwargs["use_wavescale"] = True
                 generator = EMAC(**fixed_kwargs)
                 generator.load_state_dict(state_dict, strict=True)
+                metadata = dict(metadata)
+                metadata["kwargs"] = fixed_kwargs
+                generator.metadata = metadata
                 return generator
+
+            if inferred_depthwise is not None and metadata_depthwise != inferred_depthwise:
+                return _load_state_dict_checkpoint(EMAC, kwargs, state_dict, metadata)
     except Exception as exc:
         print(f"[load_model] Falling back to EMAC.load({load_path!r}) after checkpoint inspection failed: {exc}", flush=True)
 

@@ -220,6 +220,166 @@ class Discriminator(ml.BaseModel):
         return fmaps
 
 
+def _get_2d_padding(kernel_size, dilation=(1, 1)):
+    return (
+        ((kernel_size[0] - 1) * dilation[0]) // 2,
+        ((kernel_size[1] - 1) * dilation[1]) // 2,
+    )
+
+
+def _SATNormConv2d(*args, norm: str = "weight_norm", **kwargs):
+    conv = nn.Conv2d(*args, **kwargs)
+    if norm == "weight_norm":
+        conv = weight_norm(conv)
+    elif norm not in {"none", None}:
+        raise ValueError(f"Unsupported SAT discriminator norm='{norm}'")
+    return conv
+
+
+class SATSTFTDiscriminator(nn.Module):
+    """STFT sub-discriminator matching the public SAT/AAR training recipe."""
+
+    def __init__(
+        self,
+        filters: int = 32,
+        in_channels: int = 1,
+        out_channels: int = 1,
+        n_fft: int = 1024,
+        hop_length: int = 256,
+        win_length: int = 1024,
+        max_filters: int = 1024,
+        filters_scale: int = 1,
+        kernel_size: tuple = (3, 9),
+        dilations: list = [1, 2, 4],
+        stride: tuple = (1, 2),
+        normalized: bool = True,
+        norm: str = "weight_norm",
+        activation: str = "LeakyReLU",
+        activation_params: dict = {"negative_slope": 0.2},
+    ):
+        super().__init__()
+        self.n_fft = int(n_fft)
+        self.hop_length = int(hop_length)
+        self.win_length = int(win_length)
+        self.normalized = bool(normalized)
+        self.activation = getattr(nn, activation)(**activation_params)
+        self.register_buffer("window", torch.hann_window(self.win_length), persistent=False)
+
+        spec_channels = 2 * int(in_channels)
+        self.convs = nn.ModuleList()
+        self.convs.append(
+            _SATNormConv2d(
+                spec_channels,
+                filters,
+                kernel_size=kernel_size,
+                padding=_get_2d_padding(kernel_size),
+                norm=norm,
+            )
+        )
+        in_chs = min(filters_scale * filters, max_filters)
+        for i, dilation in enumerate(dilations):
+            out_chs = min((filters_scale ** (i + 1)) * filters, max_filters)
+            self.convs.append(
+                _SATNormConv2d(
+                    in_chs,
+                    out_chs,
+                    kernel_size=kernel_size,
+                    stride=stride,
+                    dilation=(dilation, 1),
+                    padding=_get_2d_padding(kernel_size, (dilation, 1)),
+                    norm=norm,
+                )
+            )
+            in_chs = out_chs
+        out_chs = min((filters_scale ** (len(dilations) + 1)) * filters, max_filters)
+        square_kernel = (kernel_size[0], kernel_size[0])
+        self.convs.append(
+            _SATNormConv2d(
+                in_chs,
+                out_chs,
+                kernel_size=square_kernel,
+                padding=_get_2d_padding(square_kernel),
+                norm=norm,
+            )
+        )
+        self.conv_post = _SATNormConv2d(
+            out_chs,
+            out_channels,
+            kernel_size=square_kernel,
+            padding=_get_2d_padding(square_kernel),
+            norm=norm,
+        )
+
+    def forward(self, x: torch.Tensor):
+        audio = x.squeeze(1)
+        window = self.window.to(device=audio.device, dtype=audio.dtype)
+        spec = torch.stft(
+            audio,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            win_length=self.win_length,
+            window=window,
+            center=False,
+            return_complex=True,
+        )
+        if self.normalized:
+            norm_factor = torch.sqrt(torch.tensor(self.n_fft / 2, device=audio.device, dtype=audio.dtype))
+            spec = spec / norm_factor
+        z = torch.stack([spec.real.transpose(1, 2), spec.imag.transpose(1, 2)], dim=1)
+
+        fmap = []
+        for layer in self.convs:
+            z = self.activation(layer(z))
+            fmap.append(z)
+        z = self.conv_post(z)
+        return z, fmap
+
+
+class SATDiscriminator(ml.BaseModel):
+    """Multi-scale STFT discriminator from the public SAT/AAR training code."""
+
+    def __init__(
+        self,
+        filters: int = 32,
+        in_channels: int = 1,
+        out_channels: int = 1,
+        n_ffts: list = [1024, 2048, 512, 256, 128],
+        hop_lengths: list = [256, 512, 128, 64, 32],
+        win_lengths: list = [1024, 2048, 512, 256, 128],
+        **kwargs,
+    ):
+        super().__init__()
+        if not (len(n_ffts) == len(hop_lengths) == len(win_lengths)):
+            raise ValueError("n_ffts, hop_lengths, and win_lengths must have the same length")
+        self.filters = filters
+        self.n_ffts = n_ffts
+        self.hop_lengths = hop_lengths
+        self.win_lengths = win_lengths
+        self.discriminators = nn.ModuleList(
+            [
+                SATSTFTDiscriminator(
+                    filters,
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    n_fft=n_ffts[i],
+                    hop_length=hop_lengths[i],
+                    win_length=win_lengths[i],
+                    **kwargs,
+                )
+                for i in range(len(n_ffts))
+            ]
+        )
+
+    def forward(self, x: torch.Tensor):
+        logits = []
+        fmaps = []
+        for disc in self.discriminators:
+            logit, fmap = disc(x)
+            logits.append(logit)
+            fmaps.append(fmap)
+        return logits, fmaps
+
+
 if __name__ == "__main__":
     disc = Discriminator()
     x = torch.zeros(1, 1, 44100)

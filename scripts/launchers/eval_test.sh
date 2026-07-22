@@ -27,7 +27,7 @@ export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
 echo "[eval] model=${MODEL} name=${MODEL_NAME}"
 echo "[eval] input=${INPUT} recons=${RECONS} n_proc=${N_PROC} torch_threads=${TORCH_THREADS}"
 
-python -m scripts.eval \
+python -m scripts.evaluation.codec \
   --input "${INPUT}" \
   --output "${RECONS}" \
   --n_proc "${N_PROC}" \

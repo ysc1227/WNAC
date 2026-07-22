@@ -76,7 +76,28 @@ class EMAC(BaseModel, CodecMixin):
         quantizer_pooling: str = "area",
         quantizer_pooling_alpha: float = 0.5,
         quantizer_pooling_power: float = 1.0,
-        quantizer_loss_target: str = "full",
+        quantizer_upsample_mode: str = "linear",
+        quantizer_codebook_update: str = "gradient",
+        quantizer_decoder_grad_alpha: float = 0.0,
+        quantizer_residual_detach: bool = False,
+        quantizer_shared_projection: bool = False,
+        quantizer_separate_lookup_codebook: bool = False,
+        quantizer_lookup_commitment_weight: float = 1.0,
+        quantizer_lookup_codebook_weight: float = 1.0,
+        ema_decay: float = 0.99,
+        ema_epsilon: float = 1e-5,
+        ema_kmeans_init: bool = True,
+        ema_kmeans_iters: int = 50,
+        ema_threshold_ema_dead_code: int = 2,
+        quantizer_scale_anneal: bool = False,
+        quantizer_scale_anneal_steps: int = 30000,
+        quantizer_scale_anneal_start: float = 1.0,
+        quantizer_scale_anneal_mode: str = "cosine",
+        learned_downsample: bool = False,
+        learned_downsample_hidden_dim: int = None,
+        learned_downsample_kernel: int = 3,
+        learned_downsample_init_scale: float = 1e-3,
+        learned_downsample_max_scale: Union[float, list] = 0.2,
         guided_upsample: bool = False,
         guided_upsample_hidden_dim: int = None,
         guided_upsample_kernel: int = 5,
@@ -84,6 +105,18 @@ class EMAC(BaseModel, CodecMixin):
         guided_upsample_init_scale: float = 1e-3,
         guided_upsample_after_pivot_only: bool = False,
         guided_upsample_decoder_grad_alpha: float = 0.0,
+        learned_upsample: bool = False,
+        learned_upsample_mode: str = "patch",
+        learned_upsample_hidden_dim: int = None,
+        learned_upsample_kernel: int = 3,
+        learned_upsample_patch_size: Union[int, list] = 4,
+        learned_upsample_init_scale: float = 1e-3,
+        learned_upsample_condition_guide: bool = False,
+        learned_upsample_detach_guide: bool = True,
+        learned_upsample_guide_space: str = "latent_proj",
+        learned_upsample_max_scale: Union[float, list] = 1.0,
+        learned_upsample_after_pivot_only: bool = False,
+        learned_upsample_log_stages: bool = False,
     ):
         super().__init__()
 
@@ -100,6 +133,7 @@ class EMAC(BaseModel, CodecMixin):
         self.quantizer_dropout = float(quantizer_dropout)
         self.noise = noise
         self.attn_window_size = attn_window_size
+        self.depthwise = bool(depthwise)
         self.use_wavescale = use_wavescale
         self.use_seanet = use_seanet
         self.seanet_n_filters = seanet_n_filters
@@ -111,7 +145,28 @@ class EMAC(BaseModel, CodecMixin):
         self.quantizer_pooling = quantizer_pooling
         self.quantizer_pooling_alpha = float(quantizer_pooling_alpha)
         self.quantizer_pooling_power = float(quantizer_pooling_power)
-        self.quantizer_loss_target = str(quantizer_loss_target)
+        self.quantizer_upsample_mode = quantizer_upsample_mode
+        self.quantizer_codebook_update = quantizer_codebook_update
+        self.quantizer_decoder_grad_alpha = float(quantizer_decoder_grad_alpha)
+        self.quantizer_residual_detach = bool(quantizer_residual_detach)
+        self.quantizer_shared_projection = bool(quantizer_shared_projection)
+        self.quantizer_separate_lookup_codebook = bool(quantizer_separate_lookup_codebook)
+        self.quantizer_lookup_commitment_weight = float(quantizer_lookup_commitment_weight)
+        self.quantizer_lookup_codebook_weight = float(quantizer_lookup_codebook_weight)
+        self.ema_decay = float(ema_decay)
+        self.ema_epsilon = float(ema_epsilon)
+        self.ema_kmeans_init = bool(ema_kmeans_init)
+        self.ema_kmeans_iters = int(ema_kmeans_iters)
+        self.ema_threshold_ema_dead_code = int(ema_threshold_ema_dead_code)
+        self.quantizer_scale_anneal = bool(quantizer_scale_anneal)
+        self.quantizer_scale_anneal_steps = int(quantizer_scale_anneal_steps)
+        self.quantizer_scale_anneal_start = float(quantizer_scale_anneal_start)
+        self.quantizer_scale_anneal_mode = quantizer_scale_anneal_mode
+        self.learned_downsample = bool(learned_downsample)
+        self.learned_downsample_hidden_dim = learned_downsample_hidden_dim
+        self.learned_downsample_kernel = int(learned_downsample_kernel)
+        self.learned_downsample_init_scale = float(learned_downsample_init_scale)
+        self.learned_downsample_max_scale = learned_downsample_max_scale
         self.quantizer_dropout_mode = quantizer_dropout_mode
         self.guided_upsample = bool(guided_upsample)
         self.guided_upsample_hidden_dim = guided_upsample_hidden_dim
@@ -120,6 +175,18 @@ class EMAC(BaseModel, CodecMixin):
         self.guided_upsample_init_scale = float(guided_upsample_init_scale)
         self.guided_upsample_after_pivot_only = bool(guided_upsample_after_pivot_only)
         self.guided_upsample_decoder_grad_alpha = float(guided_upsample_decoder_grad_alpha)
+        self.learned_upsample = bool(learned_upsample)
+        self.learned_upsample_mode = learned_upsample_mode
+        self.learned_upsample_hidden_dim = learned_upsample_hidden_dim
+        self.learned_upsample_kernel = int(learned_upsample_kernel)
+        self.learned_upsample_patch_size = learned_upsample_patch_size
+        self.learned_upsample_init_scale = float(learned_upsample_init_scale)
+        self.learned_upsample_condition_guide = bool(learned_upsample_condition_guide)
+        self.learned_upsample_detach_guide = bool(learned_upsample_detach_guide)
+        self.learned_upsample_guide_space = learned_upsample_guide_space
+        self.learned_upsample_max_scale = learned_upsample_max_scale
+        self.learned_upsample_after_pivot_only = bool(learned_upsample_after_pivot_only)
+        self.learned_upsample_log_stages = bool(learned_upsample_log_stages)
         
         if latent_dim is None:
             latent_dim = encoder_dim * (2 ** len(encoder_rates))
@@ -192,7 +259,28 @@ class EMAC(BaseModel, CodecMixin):
             quantizer_pooling=quantizer_pooling,
             quantizer_pooling_alpha=quantizer_pooling_alpha,
             quantizer_pooling_power=quantizer_pooling_power,
-            quantizer_loss_target=quantizer_loss_target,
+            quantizer_upsample_mode=quantizer_upsample_mode,
+            quantizer_codebook_update=quantizer_codebook_update,
+            quantizer_decoder_grad_alpha=quantizer_decoder_grad_alpha,
+            quantizer_residual_detach=quantizer_residual_detach,
+            quantizer_shared_projection=quantizer_shared_projection,
+            quantizer_separate_lookup_codebook=quantizer_separate_lookup_codebook,
+            quantizer_lookup_commitment_weight=quantizer_lookup_commitment_weight,
+            quantizer_lookup_codebook_weight=quantizer_lookup_codebook_weight,
+            ema_decay=ema_decay,
+            ema_epsilon=ema_epsilon,
+            ema_kmeans_init=ema_kmeans_init,
+            ema_kmeans_iters=ema_kmeans_iters,
+            ema_threshold_ema_dead_code=ema_threshold_ema_dead_code,
+            quantizer_scale_anneal=quantizer_scale_anneal,
+            quantizer_scale_anneal_steps=quantizer_scale_anneal_steps,
+            quantizer_scale_anneal_start=quantizer_scale_anneal_start,
+            quantizer_scale_anneal_mode=quantizer_scale_anneal_mode,
+            learned_downsample=learned_downsample,
+            learned_downsample_hidden_dim=learned_downsample_hidden_dim,
+            learned_downsample_kernel=learned_downsample_kernel,
+            learned_downsample_init_scale=learned_downsample_init_scale,
+            learned_downsample_max_scale=learned_downsample_max_scale,
             guided_upsample=guided_upsample,
             guided_upsample_hidden_dim=guided_upsample_hidden_dim,
             guided_upsample_kernel=guided_upsample_kernel,
@@ -200,6 +288,18 @@ class EMAC(BaseModel, CodecMixin):
             guided_upsample_init_scale=guided_upsample_init_scale,
             guided_upsample_after_pivot_only=guided_upsample_after_pivot_only,
             guided_upsample_decoder_grad_alpha=guided_upsample_decoder_grad_alpha,
+            learned_upsample=learned_upsample,
+            learned_upsample_mode=learned_upsample_mode,
+            learned_upsample_hidden_dim=learned_upsample_hidden_dim,
+            learned_upsample_kernel=learned_upsample_kernel,
+            learned_upsample_patch_size=learned_upsample_patch_size,
+            learned_upsample_init_scale=learned_upsample_init_scale,
+            learned_upsample_condition_guide=learned_upsample_condition_guide,
+            learned_upsample_detach_guide=learned_upsample_detach_guide,
+            learned_upsample_guide_space=learned_upsample_guide_space,
+            learned_upsample_max_scale=learned_upsample_max_scale,
+            learned_upsample_after_pivot_only=learned_upsample_after_pivot_only,
+            learned_upsample_log_stages=learned_upsample_log_stages,
         )
         self.quantizer.rvq_frame_size = self.rvq_frame_size
 
@@ -340,22 +440,25 @@ class EMAC(BaseModel, CodecMixin):
         _emac_probe("forward.input_audio", audio_data)
         audio_data = self.preprocess(audio_data, sample_rate)
         _emac_probe("forward.preprocessed_audio", audio_data)
-        z, codes, latents, commitment_loss, codebook_loss, en_loss = self.encode(
+        z, codes, latents, commitment_loss, codebook_loss, _ = self.encode(
             audio_data, n_quantizers
         )
 
         x = self.decode(z)
         _emac_probe("forward.sliced_audio", x[..., :length])
 
-        return {
+        output = {
             "audio": x[..., :length],
             "z": z,
             "codes": codes,
             "latents": latents,
             "vq/commitment_loss": commitment_loss,
             "vq/codebook_loss": codebook_loss,
-            "vq/aux_loss": en_loss
         }
+        output.update(getattr(self.quantizer, "last_downsampler_metrics", {}) or {})
+        output.update(getattr(self.quantizer, "last_scale_anneal_metrics", {}) or {})
+        output.update(getattr(self.quantizer, "last_upsampler_metrics", {}) or {})
+        return output
         
     def fhat_to_audio(self, fhat):
         return self.decoder(fhat)

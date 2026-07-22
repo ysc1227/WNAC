@@ -765,7 +765,7 @@ if __name__ == "__main__":
     print("first_l:", model.first_l)
 
     with torch.no_grad():
-        _, codes, _, _, _, _ = vae_local.encode(vae_local.preprocess(input.audio_data, vae_local.sample_rate))
+        _, codes, *_ = vae_local.encode(vae_local.preprocess(input.audio_data, vae_local.sample_rate))
         aar_input = vae_local.quantizer.get_aar_input(codes, model.use_offset, model.use_scale_order, model.use_blockwise)
         conditions = cond_model.get_audio_features(input_features=cond['input_features'].to(device), is_longer=cond['is_longer'].to(device))
     

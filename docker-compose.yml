@@ -1,32 +1,39 @@
 services:
   base:
+    image: ${EMAC_DOCKER_IMAGE:-emac-dev}
     build:
       context: .
       dockerfile: ./Dockerfile.dev
       args:
-        GITHUB_TOKEN: ${GITHUB_TOKEN}
-        IMAGE: ${IMAGE}
+        BASE_IMAGE: ${BASE_IMAGE:-pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime}
+        HOST_USER_ID: ${HOST_USER_ID:-1000}
+        HOST_USER_GID: ${HOST_USER_GID:-1000}
     volumes:
       - .:/u/home/src
-      - ${PATH_TO_DATA}:/data
-      - ${PATH_TO_RUNS}:/runs
-      - ~/.config/gcloud:/u/home/.config/gcloud
-      - ~/.zsh_history:/u/home/.zsh_history
+      - ${PATH_TO_DATA:-/data}:/data
+      # Configs use paths such as runs/... relative to the repository root.
+      - ${PATH_TO_RUNS:-./runs}:/u/home/src/runs
+      - ~/.config/gcloud:/home/seungchan/.config/gcloud
+      - ~/.zsh_history:/home/seungchan/.zsh_history
     environment:
-      - GITHUB_TOKEN
       - HOST_USER_ID
       - HOST_USER_GID
       - JUPYTER_TOKEN=password
       - PATH_TO_DATA=/data
-      - PATH_TO_RUNS=/runs
-      - MPLCONFIGDIR=/u/home/.mplconfig
+      - PATH_TO_RUNS=/u/home/src/runs
+      - CUDA_VISIBLE_DEVICES=1,2
+      - NVIDIA_VISIBLE_DEVICES=1,2
+      - HOME=/home/seungchan
+      - MPLCONFIGDIR=/home/seungchan/.mplconfig
     shm_size: 32G
     working_dir: /u/home/src
+    user: "${HOST_USER_ID:-1000}:${HOST_USER_GID:-1000}"
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
+              device_ids: ["1", "2"]
               capabilities: [gpu]
   dev:
     extends: base
@@ -34,3 +41,29 @@ services:
       - interactive
     stdin_open: true
     tty: true
+
+  eval:
+    extends: base
+    profiles:
+      - evaluation
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - NVIDIA_VISIBLE_DEVICES=0
+      - NUMBA_CACHE_DIR=/tmp/numba_cache
+      - XDG_CACHE_HOME=/tmp/.cache
+      - MPLCONFIGDIR=/tmp/matplotlib
+    deploy:
+      resources:
+        reservations:
+          devices: !override
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+
+  aar:
+    extends: base
+    profiles:
+      - training
+    stdin_open: true
+    tty: true
+    command: ["sleep", "infinity"]

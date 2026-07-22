@@ -1,0 +1,16 @@
+$include:
+  - conf/8.00kbps/wavescale_13_1024.yml
+
+# Same scale multiset and bitrate as the default 8kbps WNAC config, but ordered
+# from full rate toward the bottleneck.
+EMAC.scale_factor: [1.0, 1.0, 0.92, 0.92, 0.84, 0.84, 0.72, 0.72, 0.58, 0.58, 0.44, 0.44, 0.30]
+EMAC.use_wavescale: False
+EMAC.quantizer_dropout_mode: prefix
+
+lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  waveform/loss: 0.1
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0

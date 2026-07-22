@@ -14,3 +14,4 @@ from . import utils
 from .model import EMAC
 from .model import EMACFile
 from .model import AAR
+from .model import SNACCodec

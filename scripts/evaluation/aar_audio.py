@@ -4,8 +4,8 @@ This script optionally generates paired reference/generated wavs from an AAR
 checkpoint and then computes the folder-level metrics used in the FAD/ISc/KL
 evaluation flow:
 
-  1. FAD via ``scripts.fad.compute_fad_torchvggish``
-  2. Inception Score and paired KL via CNN14 logits, matching ``scripts.kl``
+  1. FAD via ``scripts.metrics.fad.compute_fad_torchvggish``
+  2. Inception Score and paired KL via CNN14 logits from ``scripts.metrics.isc_kl``
 
 The expected folder layout is compatible with ``scripts/data/generate_aar_pairs.py``::
 

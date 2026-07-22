@@ -3,6 +3,7 @@ import sys
 import warnings
 import math
 import inspect
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,7 +49,10 @@ def ExponentialLR(optimizer, gamma: float = 1.0):
 
 # Models
 EMAC = argbind.bind(emac.model.EMAC)
+SATCodec = argbind.bind(emac.model.SATCodec)
+SNACCodec = argbind.bind(emac.model.SNACCodec)
 Discriminator = argbind.bind(emac.model.Discriminator)
+SATDiscriminator = argbind.bind(emac.model.SATDiscriminator)
 
 # Data
 AudioDataset = argbind.bind(AudioDataset, "train", "val")
@@ -184,6 +188,81 @@ def _configure_guided_upsample_stages(generator):
     return None
 
 
+@torch.no_grad()
+def _dual_codebook_metrics(generator):
+    quantizer = getattr(generator, "quantizer", None)
+    stages = getattr(quantizer, "quantizers", None)
+    if stages is None:
+        return {}
+    dual_stages = [
+        stage for stage in stages
+        if getattr(stage, "separate_lookup_codebook", False)
+    ]
+    if not dual_stages:
+        return {}
+
+    lookup_losses = [
+        stage.last_lookup_loss.float()
+        for stage in dual_stages
+        if getattr(stage, "last_lookup_loss", None) is not None
+    ]
+    relative_distances = []
+    cosine_similarities = []
+    for stage in dual_stages:
+        lookup = stage.lookup_codebook.weight.detach().float()
+        reconstruction = stage.codebook.weight.detach().float()
+        relative_distances.append(
+            (lookup - reconstruction).norm()
+            / reconstruction.norm().clamp_min(1e-8)
+        )
+        cosine_similarities.append(
+            torch.nn.functional.cosine_similarity(
+                lookup,
+                reconstruction,
+                dim=1,
+            ).mean()
+        )
+
+    metrics = {
+        "vq/codebook_separation_rel": torch.stack(relative_distances).mean(),
+        "vq/codebook_cosine": torch.stack(cosine_similarities).mean(),
+    }
+    if lookup_losses:
+        metrics["vq/lookup_loss"] = torch.stack(lookup_losses).sum()
+    return metrics
+
+
+def _optional_ddp_parameter_anchor(generator):
+    """Attach optional quantizer modules to the loss graph without changing it.
+
+    Some residual quantizer helpers, such as Phi residual convolutions, may only
+    receive gradients through auxiliary losses. When those losses are disabled
+    or detached for a particular configuration, DDP treats the trainable helper
+    parameters as unused and stops at the next iteration. A zero-valued anchor
+    keeps DDP reductions well-defined while preserving the exact objective.
+    """
+    quantizer = getattr(generator, "quantizer", None)
+    if quantizer is None:
+        return None
+
+    optional_modules = [
+        getattr(quantizer, "quant_resi", None),
+    ]
+    anchors = []
+    for module in optional_modules:
+        if module is None:
+            continue
+        anchors.extend(p.sum() * 0.0 for p in module.parameters() if p.requires_grad)
+
+    if not anchors:
+        return None
+
+    anchor = anchors[0]
+    for item in anchors[1:]:
+        anchor = anchor + item
+    return anchor
+
+
 def _sync_emac_runtime_metadata(generator, metadata=None):
     """Keep saved constructor kwargs aligned with mutable runtime modules.
 
@@ -200,7 +279,34 @@ def _sync_emac_runtime_metadata(generator, metadata=None):
             "quantizer_pooling": getattr(quantizer, "quantizer_pooling", None),
             "quantizer_pooling_alpha": getattr(quantizer, "quantizer_pooling_alpha", None),
             "quantizer_pooling_power": getattr(quantizer, "quantizer_pooling_power", None),
-            "quantizer_loss_target": getattr(quantizer, "quantizer_loss_target", None),
+            "quantizer_upsample_mode": getattr(quantizer, "quantizer_upsample_mode", None),
+            "quantizer_codebook_update": getattr(quantizer, "quantizer_codebook_update", None),
+            "quantizer_decoder_grad_alpha": getattr(quantizer, "quantizer_decoder_grad_alpha", None),
+            "quantizer_residual_detach": getattr(quantizer, "quantizer_residual_detach", None),
+            "quantizer_shared_projection": getattr(quantizer, "quantizer_shared_projection", None),
+            "quantizer_separate_lookup_codebook": getattr(
+                quantizer, "quantizer_separate_lookup_codebook", None
+            ),
+            "quantizer_lookup_commitment_weight": getattr(
+                quantizer, "quantizer_lookup_commitment_weight", None
+            ),
+            "quantizer_lookup_codebook_weight": getattr(
+                quantizer, "quantizer_lookup_codebook_weight", None
+            ),
+            "ema_decay": getattr(quantizer, "ema_decay", None),
+            "ema_epsilon": getattr(quantizer, "ema_epsilon", None),
+            "ema_kmeans_init": getattr(quantizer, "ema_kmeans_init", None),
+            "ema_kmeans_iters": getattr(quantizer, "ema_kmeans_iters", None),
+            "ema_threshold_ema_dead_code": getattr(quantizer, "ema_threshold_ema_dead_code", None),
+            "quantizer_scale_anneal": getattr(quantizer, "quantizer_scale_anneal", None),
+            "quantizer_scale_anneal_steps": getattr(quantizer, "quantizer_scale_anneal_steps", None),
+            "quantizer_scale_anneal_start": getattr(quantizer, "quantizer_scale_anneal_start", None),
+            "quantizer_scale_anneal_mode": getattr(quantizer, "quantizer_scale_anneal_mode", None),
+            "learned_downsample": getattr(quantizer, "learned_downsample", None),
+            "learned_downsample_hidden_dim": getattr(quantizer, "learned_downsample_hidden_dim", None),
+            "learned_downsample_kernel": getattr(quantizer, "learned_downsample_kernel", None),
+            "learned_downsample_init_scale": getattr(quantizer, "learned_downsample_init_scale", None),
+            "learned_downsample_max_scale": getattr(quantizer, "learned_downsample_max_scale", None),
             "guided_upsample": getattr(quantizer, "guided_upsample", None),
             "guided_upsample_hidden_dim": getattr(quantizer, "guided_upsample_hidden_dim", None),
             "guided_upsample_kernel": getattr(quantizer, "guided_upsample_kernel", None),
@@ -210,6 +316,24 @@ def _sync_emac_runtime_metadata(generator, metadata=None):
             "guided_upsample_decoder_grad_alpha": getattr(
                 quantizer, "guided_upsample_decoder_grad_alpha", None
             ),
+            "learned_upsample": getattr(quantizer, "learned_upsample", None),
+            "learned_upsample_mode": getattr(quantizer, "learned_upsample_mode", None),
+            "learned_upsample_hidden_dim": getattr(quantizer, "learned_upsample_hidden_dim", None),
+            "learned_upsample_kernel": getattr(quantizer, "learned_upsample_kernel", None),
+            "learned_upsample_patch_size": getattr(quantizer, "learned_upsample_patch_size", None),
+            "learned_upsample_init_scale": getattr(quantizer, "learned_upsample_init_scale", None),
+            "learned_upsample_condition_guide": getattr(
+                quantizer, "learned_upsample_condition_guide", None
+            ),
+            "learned_upsample_detach_guide": getattr(
+                quantizer, "learned_upsample_detach_guide", None
+            ),
+            "learned_upsample_guide_space": getattr(quantizer, "learned_upsample_guide_space", None),
+            "learned_upsample_max_scale": getattr(quantizer, "learned_upsample_max_scale", None),
+            "learned_upsample_after_pivot_only": getattr(
+                quantizer, "learned_upsample_after_pivot_only", None
+            ),
+            "learned_upsample_log_stages": getattr(quantizer, "learned_upsample_log_stages", None),
         }
         for key, value in mirrored.items():
             if value is not None:
@@ -274,7 +398,7 @@ def build_dataset(
 
 @dataclass
 class State:
-    generator: EMAC # type:ignore
+    generator: torch.nn.Module
     optimizer_g: AdamW # type:ignore
     scheduler_g: ExponentialLR # type:ignore
 
@@ -289,8 +413,180 @@ class State:
 
     train_data: AudioDataset # type:ignore
     val_data: AudioDataset # type:ignore
+    num_iters: int
 
     tracker: Tracker
+
+
+def _generator_class(name: str):
+    name = str(name).lower().replace("-", "_")
+    aliases = {
+        "default": "emac",
+        "codec": "emac",
+        "wnac": "emac",
+        "wavescale": "emac",
+        "sat": "sat",
+        "satcodec": "sat",
+        "sat_codec": "sat",
+        "aar_sat": "sat",
+        "snac": "snac",
+        "snaccodec": "snac",
+        "snac_codec": "snac",
+        "snac44": "snac",
+        "snac_44khz": "snac",
+    }
+    name = aliases.get(name, name)
+    if name == "emac":
+        return EMAC
+    if name == "sat":
+        return SATCodec
+    if name == "snac":
+        return SNACCodec
+    raise ValueError(f"Unknown generator_model='{name}'. Expected 'emac', 'sat', or 'snac'.")
+
+
+def _generator_checkpoint_folder(folder: str, Generator):
+    folder = Path(folder)
+    name = Generator.__name__.lower()
+    if (folder / name).exists():
+        return folder / name
+    return None
+
+
+def _discriminator_class(name: str):
+    name = str(name).lower().replace("-", "_")
+    aliases = {
+        "default": "emac",
+        "emac": "emac",
+        "mrd": "emac",
+        "wnac": "emac",
+        "sat": "sat",
+        "satdiscriminator": "sat",
+        "sat_discriminator": "sat",
+        "msstft": "sat",
+        "ms_stft": "sat",
+    }
+    name = aliases.get(name, name)
+    if name == "emac":
+        return Discriminator
+    if name == "sat":
+        return SATDiscriminator
+    raise ValueError(f"Unknown discriminator_model='{name}'. Expected 'emac' or 'sat'.")
+
+
+def _frequency_loss_class(name: str):
+    name = str(name).lower().replace("-", "_")
+    aliases = {
+        "default": "mel",
+        "mel": "mel",
+        "mel_spectrogram": "mel",
+        "emac": "mel",
+        "sat": "sat",
+        "sat_frequency": "sat",
+        "sat_lf": "sat",
+        "aar": "sat",
+    }
+    name = aliases.get(name, name)
+    if name == "mel":
+        return losses.MelSpectrogramLoss
+    if name == "sat":
+        return losses.SATFrequencyLoss
+    raise ValueError(f"Unknown frequency_loss='{name}'. Expected 'mel' or 'sat'.")
+
+
+def _gan_loss_class(name: str):
+    name = str(name).lower().replace("-", "_")
+    aliases = {
+        "default": "mse",
+        "emac": "mse",
+        "mse": "mse",
+        "lsgan": "mse",
+        "sat": "sat",
+        "hinge": "sat",
+        "sat_hinge": "sat",
+    }
+    name = aliases.get(name, name)
+    if name == "mse":
+        return losses.GANLoss
+    if name == "sat":
+        return losses.SATGANLoss
+    raise ValueError(f"Unknown gan_loss='{name}'. Expected 'mse' or 'sat'.")
+
+
+def _make_optimizer(params, optimizer_type: str, lr: float, betas: list, use_zero: bool):
+    optimizer_type = str(optimizer_type).lower().replace("-", "_")
+    betas = tuple(float(v) for v in betas)
+    if optimizer_type == "adam":
+        return torch.optim.Adam(params, lr=float(lr), betas=betas)
+    if optimizer_type == "adamw":
+        return AdamW(params, lr=float(lr), betas=betas, use_zero=use_zero)
+    raise ValueError(f"Unknown optimizer_type='{optimizer_type}'. Expected 'adam' or 'adamw'.")
+
+
+def _make_scheduler(
+    optimizer,
+    scheduler_type: str,
+    total_steps: int,
+    warmup_steps: int = 0,
+    gamma: float = 0.999996,
+):
+    scheduler_type = str(scheduler_type).lower().replace("-", "_")
+    if scheduler_type in {"exponential", "exp"}:
+        return torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=float(gamma))
+    if scheduler_type in {"cosine", "cosine_warmup"}:
+        total_steps = max(1, int(total_steps))
+        warmup_steps = max(0, int(warmup_steps))
+
+        def lr_lambda(step):
+            step = int(step)
+            if warmup_steps > 0 and step < warmup_steps:
+                return float(step) / float(max(1, warmup_steps))
+            progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            progress = min(1.0, max(0.0, progress))
+            return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    raise ValueError(f"Unknown scheduler_type='{scheduler_type}'. Expected 'exponential' or 'cosine'.")
+
+
+def _should_update_discriminator(step, pattern: str):
+    pattern = str(pattern).lower().replace("-", "_")
+    if pattern in {"always", "default", "emac"}:
+        return True
+    if pattern in {"sat", "skip_first_of_three"}:
+        return int(step or 0) % 3 != 0
+    raise ValueError(f"Unknown discriminator_update_pattern='{pattern}'. Expected 'always' or 'sat'.")
+
+
+def _discriminator_updates_before_generator(order: str):
+    order = str(order).lower().replace("-", "_")
+    if order in {"before_generator", "before_g", "default", "emac"}:
+        return True
+    if order in {"after_generator", "after_g", "sat"}:
+        return False
+    raise ValueError(
+        f"Unknown discriminator_update_order='{order}'. "
+        "Expected 'before_generator' or 'after_generator'."
+    )
+
+
+def _source_example_count(dataset):
+    """Estimate the finite source count behind an audiotools dataset."""
+    if hasattr(dataset, "datasets"):
+        counts = [_source_example_count(d) for d in dataset.datasets]
+        counts = [c for c in counts if c is not None]
+        return sum(counts) if counts else None
+
+    loaders = getattr(dataset, "loaders", None)
+    if isinstance(loaders, dict):
+        count = 0
+        for loader in loaders.values():
+            if hasattr(loader, "audio_indices"):
+                count += len(loader.audio_indices)
+            elif hasattr(loader, "audio_lists"):
+                count += sum(len(src) for src in loader.audio_lists)
+        return count or None
+    return None
 
 
 @argbind.bind(without_prefix=True)
@@ -299,13 +595,27 @@ def load(
     accel: ml.Accelerator,
     tracker: Tracker,
     save_path: str,
+    generator_model: str = "emac",
+    discriminator_model: str = "emac",
+    frequency_loss: str = "mel",
+    gan_loss: str = "mse",
+    optimizer_type: str = "adamw",
+    optimizer_lr: float = 1e-4,
+    optimizer_betas: list = [0.8, 0.99],
+    scheduler_type: str = "exponential",
+    scheduler_gamma: float = 0.999996,
+    scheduler_warmup_steps: int = 0,
+    scheduler_warmup_epochs: int = 0,
+    num_epochs: int = 0,
     resume: bool = False,
     tag: str = "latest",
     load_weights: bool = False,
 ):
     generator, g_extra = None, {}
     discriminator, d_extra = None, {}
-    
+    Generator = _generator_class(generator_model)
+    DiscriminatorClass = _discriminator_class(discriminator_model)
+
     if resume:
         kwargs = {
             "folder": f"{save_path}/{tag}",
@@ -314,14 +624,18 @@ def load(
             "weights_only": False
         }
         tracker.print(f"Resuming from {str(Path('.').absolute())}/{kwargs['folder']}")
-        if (Path(kwargs["folder"]) / "emac").exists():
-            generator, g_extra = EMAC.load_from_folder(**kwargs)
-        if (Path(kwargs["folder"]) / "discriminator").exists():
-            discriminator, d_extra = Discriminator.load_from_folder(**kwargs)
+        generator_folder = _generator_checkpoint_folder(kwargs["folder"], Generator)
+        if generator_folder is not None:
+            tracker.print(f"Found generator checkpoint folder: {generator_folder.name}")
+            generator, g_extra = Generator.load_from_folder(**kwargs)
+        discriminator_folder = _generator_checkpoint_folder(kwargs["folder"], DiscriminatorClass)
+        if discriminator_folder is not None:
+            tracker.print(f"Found discriminator checkpoint folder: {discriminator_folder.name}")
+            discriminator, d_extra = DiscriminatorClass.load_from_folder(**kwargs)
 
-    generator = EMAC() if generator is None else generator
+    generator = Generator() if generator is None else generator
     guided_mask = _configure_guided_upsample_stages(generator)
-    discriminator = Discriminator() if discriminator is None else discriminator
+    discriminator = DiscriminatorClass() if discriminator is None else discriminator
 
     tracker.print(generator)
     tracker.print(discriminator)
@@ -330,25 +644,6 @@ def load(
             
     generator = accel.prepare_model(generator)
     discriminator = accel.prepare_model(discriminator)
-
-    with argbind.scope(args, "generator"):
-        optimizer_g = AdamW(generator.parameters(), use_zero=accel.use_ddp)
-        scheduler_g = ExponentialLR(optimizer_g)
-    with argbind.scope(args, "discriminator"):
-        optimizer_d = AdamW(discriminator.parameters(), use_zero=accel.use_ddp)
-        scheduler_d = ExponentialLR(optimizer_d)
-
-    if "optimizer.pth" in g_extra:
-        optimizer_g.load_state_dict(g_extra["optimizer.pth"])
-    if "scheduler.pth" in g_extra:
-        scheduler_g.load_state_dict(g_extra["scheduler.pth"])
-    if "tracker.pth" in g_extra:
-        tracker.load_state_dict(g_extra["tracker.pth"])
-
-    if "optimizer.pth" in d_extra:
-        optimizer_d.load_state_dict(d_extra["optimizer.pth"])
-    if "scheduler.pth" in d_extra:
-        scheduler_d.load_state_dict(d_extra["scheduler.pth"])
 
     sample_rate = accel.unwrap(generator).sample_rate
     
@@ -362,10 +657,72 @@ def load(
     if rvq_frame_size is not None:
         tracker.print(f"RVQ frame_size inferred for checkpoint metadata: {rvq_frame_size}")
 
+    source_examples = _source_example_count(train_data)
+    epoch_examples = source_examples if source_examples is not None else len(train_data)
+    batch_size = int(_arg_get(args, "batch_size", 12) or 12)
+    steps_per_epoch = math.ceil(epoch_examples / max(1, batch_size * max(1, accel.world_size)))
+    configured_num_iters = int(_arg_get(args, "num_iters", 250000) or 0)
+    if int(num_epochs or 0) > 0:
+        num_iters = int(num_epochs) * max(1, steps_per_epoch)
+    else:
+        num_iters = configured_num_iters if configured_num_iters > 0 else 250000
+    if int(scheduler_warmup_steps) <= 0 and int(scheduler_warmup_epochs) > 0:
+        scheduler_warmup_steps = int(scheduler_warmup_epochs) * max(1, steps_per_epoch)
+    tracker.print(
+        f"Optimizer={optimizer_type}, lr={optimizer_lr}, betas={optimizer_betas}; "
+        f"scheduler={scheduler_type}, warmup_steps={scheduler_warmup_steps}, "
+        f"steps_per_epoch={steps_per_epoch}, total_steps={num_iters}"
+    )
+
+    optimizer_g = _make_optimizer(
+        generator.parameters(),
+        optimizer_type=optimizer_type,
+        lr=optimizer_lr,
+        betas=optimizer_betas,
+        use_zero=accel.use_ddp and str(optimizer_type).lower() == "adamw",
+    )
+    optimizer_d = _make_optimizer(
+        discriminator.parameters(),
+        optimizer_type=optimizer_type,
+        lr=optimizer_lr,
+        betas=optimizer_betas,
+        use_zero=accel.use_ddp and str(optimizer_type).lower() == "adamw",
+    )
+    scheduler_g = _make_scheduler(
+        optimizer_g,
+        scheduler_type=scheduler_type,
+        total_steps=num_iters,
+        warmup_steps=scheduler_warmup_steps,
+        gamma=scheduler_gamma,
+    )
+    scheduler_d = _make_scheduler(
+        optimizer_d,
+        scheduler_type=scheduler_type,
+        total_steps=num_iters,
+        warmup_steps=scheduler_warmup_steps,
+        gamma=scheduler_gamma,
+    )
+
+    if "optimizer.pth" in g_extra:
+        optimizer_g.load_state_dict(g_extra["optimizer.pth"])
+    if "scheduler.pth" in g_extra:
+        scheduler_g.load_state_dict(g_extra["scheduler.pth"])
+    if "tracker.pth" in g_extra:
+        tracker.load_state_dict(g_extra["tracker.pth"])
+
+    if "optimizer.pth" in d_extra:
+        optimizer_d.load_state_dict(d_extra["optimizer.pth"])
+    if "scheduler.pth" in d_extra:
+        scheduler_d.load_state_dict(d_extra["scheduler.pth"])
+
     waveform_loss = losses.L1Loss()
     stft_loss = losses.MultiScaleSTFTLoss()
-    mel_loss = losses.MelSpectrogramLoss()
-    gan_loss = losses.GANLoss(discriminator)
+    mel_loss_cls = _frequency_loss_class(frequency_loss)
+    mel_loss = mel_loss_cls(sample_rate=sample_rate) if mel_loss_cls is losses.SATFrequencyLoss else mel_loss_cls()
+    tracker.print(f"Using frequency loss: {mel_loss.__class__.__name__}")
+    gan_loss_cls = _gan_loss_class(gan_loss)
+    gan_loss = gan_loss_cls(discriminator)
+    tracker.print(f"Using GAN loss: {gan_loss.__class__.__name__}")
 
     return State(
         generator=generator,
@@ -381,6 +738,7 @@ def load(
         tracker=tracker,
         train_data=train_data,
         val_data=val_data,
+        num_iters=num_iters,
     )
 
 
@@ -396,20 +754,57 @@ def val_loop(batch, state, accel):
     out = state.generator(signal.audio_data, signal.sample_rate)
     recons = AudioSignal(out["audio"], signal.sample_rate)
 
-    return {
+    output = {
         "loss": state.mel_loss(recons, signal),
         "mel/loss": state.mel_loss(recons, signal),
         "stft/loss": state.stft_loss(recons, signal),
         "waveform/loss": state.waveform_loss(recons, signal),
     }
+    return output
+
+
+def _lambda_warmup_scale(step, schedule):
+    if not schedule:
+        return 1.0
+    if isinstance(schedule, (int, float)):
+        start = 0
+        duration = float(schedule)
+        min_scale = 0.0
+    else:
+        start = int(schedule.get("start", 0))
+        duration = float(schedule.get("duration", schedule.get("steps", 0)))
+        min_scale = float(schedule.get("min", schedule.get("min_scale", 0.0)))
+    if duration <= 0:
+        return 1.0
+    if step is None:
+        return min_scale
+    progress = (float(step) - float(start)) / duration
+    progress = max(0.0, min(1.0, progress))
+    return min_scale + (1.0 - min_scale) * progress
 
 
 @timer()
-def train_loop(state, batch, accel, lambdas, tracker, num_iters):
+def train_loop(
+    state,
+    batch,
+    accel,
+    lambdas,
+    lambda_warmups,
+    tracker,
+    num_iters,
+    discriminator_update_pattern,
+    discriminator_update_order,
+    generator_grad_clip,
+    discriminator_grad_clip,
+):
     state.generator.train()
     state.discriminator.train()
     output = {}
     step = getattr(tracker, "step", None)
+    generator = accel.unwrap(state.generator)
+    set_step = getattr(getattr(generator, "quantizer", None), "set_training_step", None)
+    if callable(set_step):
+        set_step(step)
     
     batch = util.prepare_batch(batch, accel.device)
     _finite_summary("batch.signal.raw", batch.get("signal"), step)
@@ -425,27 +820,42 @@ def train_loop(state, batch, accel, lambdas, tracker, num_iters):
 
         commitment_loss = out["vq/commitment_loss"]        
         codebook_loss = out["vq/codebook_loss"]
-        aux_loss = out["vq/aux_loss"]
     _finite_summary("generator.out.audio", out["audio"], step)
     _finite_summary("recons.audio", recons, step)
     _finite_summary("vq.commitment_loss", commitment_loss, step)
     _finite_summary("vq.codebook_loss", codebook_loss, step)
-    _finite_summary("vq.aux_loss", aux_loss, step)
 
-    with accel.autocast():
-        output["adv/disc_loss"] = state.gan_loss.discriminator_loss(recons, signal)
-    _finite_summary("loss.adv_disc_before_backward", output["adv/disc_loss"], step)
-
-    state.optimizer_d.zero_grad()
-    accel.backward(output["adv/disc_loss"])
-    accel.scaler.unscale_(state.optimizer_d)
-    output["other/grad_norm_d"] = torch.nn.utils.clip_grad_norm_(
-        state.discriminator.parameters(), 10.0
+    update_discriminator = _should_update_discriminator(step, discriminator_update_pattern)
+    discriminator_before_generator = _discriminator_updates_before_generator(
+        discriminator_update_order
     )
-    _finite_summary("grad_norm_d", output["other/grad_norm_d"], step)
-    accel.step(state.optimizer_d)
-    state.scheduler_d.step()
-    _module_param_probe("discriminator.after_step", accel.unwrap(state.discriminator), step)
+    output["adv/disc_update"] = signal.audio_data.new_tensor(float(update_discriminator))
+
+    def discriminator_step():
+        state.optimizer_d.zero_grad()
+        if update_discriminator:
+            with accel.autocast():
+                output["adv/disc_loss"] = state.gan_loss.discriminator_loss(recons, signal)
+            _finite_summary("loss.adv_disc_before_backward", output["adv/disc_loss"], step)
+
+            accel.backward(output["adv/disc_loss"])
+            accel.scaler.unscale_(state.optimizer_d)
+            if float(discriminator_grad_clip) > 0:
+                output["other/grad_norm_d"] = torch.nn.utils.clip_grad_norm_(
+                    state.discriminator.parameters(), float(discriminator_grad_clip)
+                )
+            else:
+                output["other/grad_norm_d"] = signal.audio_data.new_tensor(0.0)
+            _finite_summary("grad_norm_d", output["other/grad_norm_d"], step)
+            accel.step(state.optimizer_d)
+        else:
+            output["adv/disc_loss"] = signal.audio_data.new_tensor(0.0)
+            output["other/grad_norm_d"] = signal.audio_data.new_tensor(0.0)
+        state.scheduler_d.step()
+        _module_param_probe("discriminator.after_step", accel.unwrap(state.discriminator), step)
+
+    if discriminator_before_generator:
+        discriminator_step()
 
     with accel.autocast():
         output["stft/loss"] = state.stft_loss(recons, signal)
@@ -461,22 +871,48 @@ def train_loop(state, batch, accel, lambdas, tracker, num_iters):
         output["vq/c_loss_last"] = commitment_loss[-1]
         output["vq/commitment_loss"] = sum(commitment_loss)
         output["vq/codebook_loss"] = sum(codebook_loss)
-        output["vq/aux_loss"] = aux_loss
-        output["loss"] = sum([v * output[k] for k, v in lambdas.items() if k in output])
+        output.update({k: v for k, v in out.items() if k.startswith("downsampler/")})
+        output.update({k: v for k, v in out.items() if k.startswith("scale_anneal/")})
+        output.update({k: v for k, v in out.items() if k.startswith("upsampler/")})
+        output.update(_dual_codebook_metrics(accel.unwrap(state.generator)))
+        effective_lambdas = {}
+        for name, value in lambdas.items():
+            scale = _lambda_warmup_scale(step, (lambda_warmups or {}).get(name))
+            effective_lambdas[name] = value * scale
+            if name in output and scale != 1.0:
+                output[f"lambda/{name}"] = output[name].new_tensor(effective_lambdas[name])
+            if name in output:
+                output[f"weighted/{name.replace('/', '_')}"] = (
+                    output[name] * effective_lambdas[name]
+                )
+        output["loss"] = sum(
+            [v * output[k] for k, v in effective_lambdas.items() if k in output]
+        )
+        ddp_anchor = _optional_ddp_parameter_anchor(accel.unwrap(state.generator))
+        if ddp_anchor is not None:
+            output["loss"] = output["loss"] + ddp_anchor
     for _k in ["stft/loss", "mel/loss", "waveform/loss", "adv/gen_loss", "adv/feat_loss", "vq/commitment_loss", "vq/codebook_loss", "loss"]:
         _finite_summary(f"output.{_k}", output[_k], step)
         
     state.optimizer_g.zero_grad()
     accel.backward(output["loss"])
     accel.scaler.unscale_(state.optimizer_g)
-    output["other/grad_norm"] = torch.nn.utils.clip_grad_norm_(
-        state.generator.parameters(), 1e3
-    )
+    if float(generator_grad_clip) > 0:
+        output["other/grad_norm"] = torch.nn.utils.clip_grad_norm_(
+            state.generator.parameters(), float(generator_grad_clip)
+        )
+    else:
+        output["other/grad_norm"] = signal.audio_data.new_tensor(0.0)
     _finite_summary("grad_norm_g", output["other/grad_norm"], step)
     accel.step(state.optimizer_g)
+    generator = accel.unwrap(state.generator)
     state.scheduler_g.step()
+
+    if not discriminator_before_generator:
+        discriminator_step()
+
     accel.update()
-    _module_param_probe("generator.after_step", accel.unwrap(state.generator), step)
+    _module_param_probe("generator.after_step", generator, step)
 
     output["other/learning_rate"] = state.optimizer_g.param_groups[0]["lr"]
     output["other/batch_size"] = signal.batch_size * accel.world_size
@@ -558,6 +994,18 @@ def validate(state, val_dataloader, accel):
     return output
 
 
+def write_upsampler_stage_metrics(state, save_path: str, step: int, accel):
+    generator = accel.unwrap(state.generator)
+    quantizer = getattr(generator, "quantizer", None)
+    stages = getattr(quantizer, "last_upsampler_stage_metrics", None)
+    if not stages:
+        return
+    path = Path(save_path) / "upsampler_stage_metrics.jsonl"
+    record = {"step": int(step), "stages": stages}
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, sort_keys=True) + "\n")
+
+
 @argbind.bind(without_prefix=True)
 def train(
     args,
@@ -573,6 +1021,12 @@ def train(
     num_workers: int = 8,
     val_idx: list = [0, 1, 2, 3, 4, 5, 6, 7],
     skip_initial_eval: bool = False,
+    upsampler_stage_metric_freq: int = 100,
+    discriminator_update_pattern: str = "always",
+    discriminator_update_order: str = "before_generator",
+    generator_grad_clip: float = 1e3,
+    discriminator_grad_clip: float = 10.0,
+    lambda_warmups: dict = None,
     lambdas: dict = {
         "mel/loss": 100.0,
         "adv/feat_loss": 2.0,
@@ -591,6 +1045,8 @@ def train(
     )
 
     state = load(args, accel, tracker, save_path)
+    if getattr(state, "num_iters", None) is not None:
+        num_iters = int(state.num_iters)
     train_dataloader = accel.prepare_dataloader(
         state.train_data,
         start_idx=state.tracker.step * batch_size,
@@ -623,7 +1079,25 @@ def train(
 
     with tracker.live:
         for tracker.step, batch in enumerate(train_dataloader, start=tracker.step):
-            train_loop(state, batch, accel, lambdas, tracker, num_iters)
+            train_loop(
+                state,
+                batch,
+                accel,
+                lambdas,
+                lambda_warmups,
+                tracker,
+                num_iters,
+                discriminator_update_pattern,
+                discriminator_update_order,
+                generator_grad_clip,
+                discriminator_grad_clip,
+            )
+            if (
+                accel.local_rank == 0
+                and upsampler_stage_metric_freq > 0
+                and tracker.step % upsampler_stage_metric_freq == 0
+            ):
+                write_upsampler_stage_metrics(state, save_path, tracker.step, accel)
 
             last_iter = (
                 tracker.step == num_iters - 1 if num_iters is not None else False

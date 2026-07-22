@@ -47,4 +47,3 @@ lambdas:
   waveform/loss: 0.1
   vq/commitment_loss: 0.25
   vq/codebook_loss: 1.0
-  vq/aux_loss: 0.0

@@ -1,7 +1,6 @@
 import typing
 from typing import List
 
-import librosa
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -341,6 +340,149 @@ class MelSpectrogramLoss(nn.Module):
         return loss
 
 
+class SATFrequencyLoss(nn.Module):
+    """Frequency loss used by the original SAT training code.
+
+    SAT's ``l_f`` sums L1 and L2 losses over log-mel spectrograms computed at
+    FFT sizes 2**5 through 2**11.  The original implementation pads by
+    ``(n_fft - hop_length) // 2`` and then runs an STFT with ``center=False``.
+    """
+
+    def __init__(
+        self,
+        window_exponents: List[int] = [5, 6, 7, 8, 9, 10, 11],
+        n_mel_channels: int = 64,
+        sample_rate: int = 24000,
+        mel_fmin: float = 0.0,
+        mel_fmax: float = None,
+        clamp_eps: float = 1e-5,
+    ):
+        super().__init__()
+        self.window_exponents = [int(i) for i in window_exponents]
+        self.n_mel_channels = int(n_mel_channels)
+        self.sample_rate = int(sample_rate)
+        self.mel_fmin = float(mel_fmin)
+        self.mel_fmax = mel_fmax
+        self.clamp_eps = float(clamp_eps)
+        self.l1_loss = nn.L1Loss(reduction="mean")
+        self.l2_loss = nn.MSELoss(reduction="mean")
+
+        for exponent in self.window_exponents:
+            n_fft = 2 ** int(exponent)
+            mel_basis = self._build_mel_basis(
+                sample_rate=self.sample_rate,
+                n_fft=n_fft,
+                n_mels=self.n_mel_channels,
+                fmin=self.mel_fmin,
+                fmax=self.mel_fmax,
+            )
+            self.register_buffer(
+                f"mel_basis_{n_fft}",
+                mel_basis.float(),
+                persistent=False,
+            )
+            self.register_buffer(
+                f"window_{n_fft}",
+                torch.hann_window(n_fft),
+                persistent=False,
+            )
+
+    @staticmethod
+    def _hz_to_mel(frequencies: np.ndarray) -> np.ndarray:
+        frequencies = np.asanyarray(frequencies, dtype=np.float64)
+        f_sp = 200.0 / 3
+        mels = frequencies / f_sp
+        min_log_hz = 1000.0
+        min_log_mel = min_log_hz / f_sp
+        logstep = np.log(6.4) / 27.0
+        log_t = frequencies >= min_log_hz
+        mels[log_t] = min_log_mel + np.log(frequencies[log_t] / min_log_hz) / logstep
+        return mels
+
+    @staticmethod
+    def _mel_to_hz(mels: np.ndarray) -> np.ndarray:
+        mels = np.asanyarray(mels, dtype=np.float64)
+        f_sp = 200.0 / 3
+        frequencies = f_sp * mels
+        min_log_hz = 1000.0
+        min_log_mel = min_log_hz / f_sp
+        logstep = np.log(6.4) / 27.0
+        log_t = mels >= min_log_mel
+        frequencies[log_t] = min_log_hz * np.exp(logstep * (mels[log_t] - min_log_mel))
+        return frequencies
+
+    @classmethod
+    def _build_mel_basis(
+        cls,
+        sample_rate: int,
+        n_fft: int,
+        n_mels: int,
+        fmin: float = 0.0,
+        fmax: float = None,
+    ) -> torch.Tensor:
+        fmax = float(sample_rate) / 2 if fmax is None else float(fmax)
+        fft_freqs = np.linspace(0.0, float(sample_rate) / 2, 1 + n_fft // 2)
+        min_mel = cls._hz_to_mel(np.array([float(fmin)]))[0]
+        max_mel = cls._hz_to_mel(np.array([fmax]))[0]
+        mel_f = cls._mel_to_hz(np.linspace(min_mel, max_mel, int(n_mels) + 2))
+
+        fdiff = np.diff(mel_f)
+        ramps = np.subtract.outer(mel_f, fft_freqs)
+        weights = np.zeros((int(n_mels), int(1 + n_fft // 2)), dtype=np.float32)
+        for i in range(int(n_mels)):
+            lower = -ramps[i] / fdiff[i]
+            upper = ramps[i + 2] / fdiff[i + 1]
+            weights[i] = np.maximum(0.0, np.minimum(lower, upper))
+
+        enorm = 2.0 / (mel_f[2 : int(n_mels) + 2] - mel_f[: int(n_mels)])
+        weights *= enorm[:, np.newaxis]
+        return torch.from_numpy(weights)
+
+    @staticmethod
+    def _audio_tensor(x):
+        if isinstance(x, AudioSignal):
+            return x.audio_data
+        return x
+
+    @staticmethod
+    def _reflect_pad(audio: torch.Tensor, pad: int) -> torch.Tensor:
+        if pad <= 0:
+            return audio
+        if audio.shape[-1] > pad:
+            return F.pad(audio, (pad, pad), mode="reflect")
+        return F.pad(audio, (pad, pad), mode="replicate")
+
+    def _log_mel(self, audio: torch.Tensor, n_fft: int) -> torch.Tensor:
+        hop_length = n_fft // 4
+        pad = (n_fft - hop_length) // 2
+        audio = self._reflect_pad(audio, pad).squeeze(1)
+        window = getattr(self, f"window_{n_fft}").to(device=audio.device, dtype=audio.dtype)
+        mel_basis = getattr(self, f"mel_basis_{n_fft}").to(device=audio.device, dtype=audio.dtype)
+        stft = torch.stft(
+            audio,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            win_length=n_fft,
+            window=window,
+            center=False,
+            return_complex=True,
+        )
+        power = stft.real.pow(2) + stft.imag.pow(2)
+        mel = torch.matmul(mel_basis, power)
+        return torch.log10(mel.clamp_min(self.clamp_eps))
+
+    def forward(self, x: AudioSignal, y: AudioSignal):
+        x_audio = self._audio_tensor(x)
+        y_audio = self._audio_tensor(y)
+        loss = x_audio.new_tensor(0.0)
+        for exponent in self.window_exponents:
+            n_fft = 2 ** int(exponent)
+            x_mel = self._log_mel(x_audio, n_fft)
+            y_mel = self._log_mel(y_audio, n_fft)
+            loss = loss + self.l1_loss(x_mel, y_mel) + self.l2_loss(x_mel, y_mel)
+        return loss
+
+
 class GANLoss(nn.Module):
     """
     Computes a discriminator loss, given a discriminator on
@@ -378,6 +520,70 @@ class GANLoss(nn.Module):
         for i in range(len(d_fake)):
             for j in range(len(d_fake[i]) - 1):
                 loss_feature += F.l1_loss(d_fake[i][j], d_real[i][j].detach())
+        return loss_g, loss_feature
+
+
+class SATGANLoss(nn.Module):
+    """Hinge GAN and relative feature matching losses used by SAT/AAR."""
+
+    def __init__(self, discriminator, eps: float = 1e-8):
+        super().__init__()
+        self.discriminator = discriminator
+        self.eps = float(eps)
+
+    @staticmethod
+    def _audio(x):
+        return x.audio_data if isinstance(x, AudioSignal) else x
+
+    def forward(self, fake, real):
+        logits_fake, fmap_fake = self.discriminator(self._audio(fake))
+        logits_real, fmap_real = self.discriminator(self._audio(real))
+        return logits_fake, fmap_fake, logits_real, fmap_real
+
+    def discriminator_loss(self, fake, real):
+        fake_audio = self._audio(fake).detach().contiguous()
+        real_audio = self._audio(real)
+        logits_fake, _ = self.discriminator(fake_audio)
+        logits_real, _ = self.discriminator(real_audio)
+
+        loss = real_audio.new_tensor(0.0)
+        for real_logit, fake_logit in zip(logits_real, logits_fake):
+            loss = loss + torch.mean(F.relu(1 - real_logit))
+            loss = loss + torch.mean(F.relu(1 + fake_logit))
+        return loss / max(1, len(logits_real))
+
+    def generator_loss(self, fake, real):
+        fake_audio = self._audio(fake)
+        real_audio = self._audio(real)
+
+        # During the generator update the discriminator is only a fixed
+        # perceptual map. Running the real branch first under no_grad avoids
+        # legacy weight_norm version bumps between fake forward and backward.
+        requires_grad = [p.requires_grad for p in self.discriminator.parameters()]
+        for p in self.discriminator.parameters():
+            p.requires_grad_(False)
+        try:
+            with torch.no_grad():
+                logits_real, fmap_real = self.discriminator(real_audio)
+            logits_fake, fmap_fake = self.discriminator(fake_audio)
+        finally:
+            for p, value in zip(self.discriminator.parameters(), requires_grad):
+                p.requires_grad_(value)
+
+        loss_g = fake_audio.new_tensor(0.0)
+        for fake_logit in logits_fake:
+            loss_g = loss_g + torch.mean(F.relu(1 - fake_logit)) / max(1, len(logits_fake))
+        loss_g = loss_g / max(1, len(fmap_real))
+
+        loss_feature = fake_audio.new_tensor(0.0)
+        feature_count = 0
+        for real_maps, fake_maps in zip(fmap_real, fmap_fake):
+            for real_feature, fake_feature in zip(real_maps, fake_maps):
+                denom = torch.mean(torch.abs(real_feature)).clamp_min(self.eps)
+                loss_feature = loss_feature + F.l1_loss(real_feature, fake_feature) / denom
+                feature_count += 1
+        if feature_count > 0:
+            loss_feature = loss_feature / feature_count
         return loss_g, loss_feature
     
     

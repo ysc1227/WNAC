@@ -1,0 +1,52 @@
+$include:
+  - conf/base.yml
+
+# WNAC 4.6kbps setting matched to SAT/AAR's reported token budget.
+#
+# This is not a SAT backbone reproduction.  SAT uses a SoundStream-style
+# autoencoder, while this config keeps the existing EMAC codec backbone fixed:
+#   encoder_rates = [2, 4, 8, 8], decoder_rates = [8, 8, 4, 2]
+# so hop_length = 512 and latent frame rate = 44100 / 512 ~= 86.13 Hz.
+#
+# With codebook_size=1024 (10 bits/token), a 4.6kbps target requires:
+#   effective_scale_sum ~= 4600 / ((44100 / 512) * 10) = 5.3406
+#
+# Because use_wavescale=True expands base scales as:
+#   scale_factor[::-1] + scale_factor[1:]
+# The schedule below is an 11-stage downsample of the 8kbps 0.05-pivot WNAC
+# shape.  Uniformly sampling that curve gives a slightly low budget, so the
+# middle scales are gently lifted while preserving the pivot and full-resolution
+# endpoints.  The actual 11-stage schedule is:
+#   [1.0, 0.7295, 0.4911, 0.2900, 0.1347, 0.0500,
+#    0.1347, 0.2900, 0.4911, 0.7295, 1.0]
+# whose sum is 5.3406 and bitrate is ~= 4.60kbps.
+EMAC.scale_factor: [0.05, 0.1347, 0.29, 0.4911, 0.7295, 1.0]
+EMAC.use_wavescale: True
+
+# Match the WNAC/DAC recipe's codebook cardinality and embedding dimension.
+# The comparison to SAT is bitrate/token-budget matched, not architecture
+# matched; only the scale schedule is changed from the 8kbps WNAC setting.
+EMAC.codebook_size: 1024
+EMAC.codebook_dim: 8
+
+# EMAC backbone, not SAT's SoundStream-style backbone.
+EMAC.encoder_rates: [2, 4, 8, 8]
+EMAC.decoder_rates: [8, 8, 4, 2]
+EMAC.decoder_dim: 1536
+EMAC.depthwise: False
+EMAC.noise: False
+
+EMAC.quantizer_dropout: 0.0
+EMAC.quantizer_dropout_mode: symmetric_shell
+
+batch_size: 24
+num_iters: 250000
+train/AudioDataset.duration: 1.0
+
+lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  waveform/loss: 0.1
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0

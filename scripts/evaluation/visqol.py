@@ -94,6 +94,13 @@ def get_visqol(signal_path, recons_path):
     signal = AudioSignal(signal_path)
     recons = AudioSignal(recons_path)
 
+    ref_sr = int(signal.sample_rate)
+    deg_sr = int(recons.sample_rate)
+    ref_frames = int(signal.shape[-1])
+    deg_frames = int(recons.shape[-1])
+    ref_duration = ref_frames / ref_sr
+    deg_duration = deg_frames / deg_sr
+
     # Resample to ViSQOL's expected sample rate
     signal = signal.resample(target_sr)
     recons = recons.resample(target_sr)
@@ -109,6 +116,14 @@ def get_visqol(signal_path, recons_path):
         f"visqol-{mode}": result.moslqo,
         "path": str(signal_path),
         "recons_path": str(recons_path),
+        "ref_sr": ref_sr,
+        "recons_sr": deg_sr,
+        "ref_frames": ref_frames,
+        "recons_frames": deg_frames,
+        "ref_duration": ref_duration,
+        "recons_duration": deg_duration,
+        "duration_delta": deg_duration - ref_duration,
+        "frame_delta": deg_frames - ref_frames,
         "worker_pid": os.getpid(),
     }
     return output
@@ -192,12 +207,13 @@ def evaluate_visqol(
     total = len(pairs)
     score_key = f"visqol-{mode}"
     csv_path = recons_root / f"visqol_{mode}.csv"
+    tmp_csv_path = csv_path.with_name(f"{csv_path.name}.tmp")
     t0 = time.time()
 
     print(f"[visqol] Starting {total} pairs  |  mode={mode}  |  workers={n_proc}")
     print(f"[visqol] Results will be saved to {csv_path}")
 
-    with open(csv_path, "w", newline="") as csvfile:
+    with open(tmp_csv_path, "w", newline="") as csvfile:
         with ProcessPoolExecutor(
             n_proc,
             mp.get_context("fork"),
@@ -245,6 +261,8 @@ def evaluate_visqol(
                     f"pid={o.get('worker_pid')}  {fname}",
                     flush=True,
                 )
+
+    tmp_csv_path.replace(csv_path)
 
     elapsed_total = time.time() - t0
     avg = sum(scores) / len(scores) if scores else 0.0

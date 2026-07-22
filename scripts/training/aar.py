@@ -493,7 +493,7 @@ def train_loop(state, batch, accel, duration, tracker, num_iters):
         generator = accel.unwrap(state.generator)
 
         cond = state.cond_processor(audio=[data.squeeze(0).cpu().numpy() for data in segment.resample(48000).audio_data], return_tensors="pt", sampling_rate=48000)
-        _, codes, _, _, _, _ = vae.encode(vae.preprocess(segment.audio_data, vae.sample_rate))
+        _, codes, *_ = vae.encode(vae.preprocess(segment.audio_data, vae.sample_rate))
         
         conditions = cond_model.get_audio_features(input_features=cond['input_features'].to(accel.device), is_longer=cond['is_longer'].to(accel.device))
 
@@ -581,7 +581,7 @@ def save_samples(state, duration, val_idx, writer, tracker):
     
     cond = state.cond_processor(audio=[data.squeeze(0).cpu().numpy() for data in segment.resample(48000).audio_data], return_tensors="pt", sampling_rate=48000)
     conditions = accel.unwrap(state.cond_model).get_audio_features(input_features=cond['input_features'].to(accel.device), is_longer=cond['is_longer'].to(accel.device))
-    _, codes, _, _, _, _ = vae.encode(vae.preprocess(segment.audio_data, vae.sample_rate))
+    _, codes, *_ = vae.encode(vae.preprocess(segment.audio_data, vae.sample_rate))
     first_chunk = next(iter_aar_code_chunks(codes, generator))[2]
     aar_input = torch.concat(
         vae.quantizer.get_aar_input(

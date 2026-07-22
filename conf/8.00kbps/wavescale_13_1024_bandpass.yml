@@ -1,4 +1,0 @@
-$include:
-  - conf/8.00kbps/wavescale_13_1024.yml
-
-EMAC.quantizer_loss_target: bandpass

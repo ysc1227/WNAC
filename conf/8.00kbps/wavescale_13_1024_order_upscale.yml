@@ -1,0 +1,23 @@
+$include:
+  - conf/8.00kbps/wavescale_13_1024.yml
+
+# Same 13-stage token budget as the default 8kbps WNAC config, but ordered
+# monotonically from the bottleneck toward full rate without repeated scales.
+#
+# The default expanded WNAC schedule sums to 9.30:
+#   [1.00, 0.92, 0.84, 0.72, 0.58, 0.44, 0.30,
+#    0.44, 0.58, 0.72, 0.84, 0.92, 1.00]
+#
+# This variant keeps sum(scale_factor)=9.30 while removing same-scale pairs:
+#   44100 / 512 * 10 * 9.30 ~= 8.01 kbps
+EMAC.scale_factor: [0.30, 0.36, 0.45, 0.55, 0.64, 0.71, 0.77, 0.82, 0.88, 0.90, 0.94, 0.98, 1.0]
+EMAC.use_wavescale: False
+EMAC.quantizer_dropout_mode: prefix
+
+lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  waveform/loss: 0.1
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0

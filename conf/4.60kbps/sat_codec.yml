@@ -1,0 +1,95 @@
+$include:
+  - conf/base.yml
+
+# SAT tokenizer reproduced on the EMAC/audiotools training stack.
+#
+# This uses:
+#   - 24 kHz mono audio
+#   - SEANet encoder/decoder ratios [8, 5, 4, 2], hop_length = 320
+#   - 1024-channel codec latent
+#   - 16 multiscale RVQ stages with SAT/AAR token counts
+#   - 1024-entry, 64-dimensional codebooks
+#
+# The native SAT/AAR schedule is absolute for a 1 s, 24 kHz crop:
+#   [1, 2, 4, 6, 9, 12, 16, 20, 25, 31, 37, 43, 50, 58, 66, 75]
+# SATCodec normalizes this by reference_frames=75, so the effective bitrate is:
+#   10 bits * sum(schedule) = 4550 bit/s ~= 4.55 kbps for 1 s audio.
+generator_model: sat
+discriminator_model: sat
+frequency_loss: sat
+gan_loss: sat
+optimizer_type: adam
+optimizer_lr: 0.0003
+optimizer_betas: [0.5, 0.9]
+scheduler_type: cosine
+# For the controlled 250k-step reproduced baseline, use the same warmup ratio
+# as the original SAT recipe (2 epochs / 100 epochs = 2%) instead of tying
+# warmup to the much larger source dataset length.
+scheduler_warmup_steps: 5000
+scheduler_warmup_epochs: 0
+discriminator_update_pattern: sat
+discriminator_update_order: sat
+generator_grad_clip: 1.0
+discriminator_grad_clip: 1.0
+
+SATCodec.sample_rate: 24000
+SATCodec.ratios: [8, 5, 4, 2]
+SATCodec.dimension: 1024
+SATCodec.codebook_size: 1024
+SATCodec.codebook_dim: 64
+SATCodec.multi_scale: [1, 2, 4, 6, 9, 12, 16, 20, 25, 31, 37, 43, 50, 58, 66, 75]
+SATCodec.reference_frames: 75
+SATCodec.scale_order: upscale
+SATCodec.use_wavescale: false
+SATCodec.phi_kernel: [9, 9, 9, 9, 9, 9]
+SATCodec.model_norm: weight_norm
+SATCodec.causal: false
+SATCodec.n_filters: 32
+SATCodec.n_residual_layers: 1
+SATCodec.lstm: 2
+SATCodec.ema_decay: 0.99
+SATCodec.ema_kmeans_init: true
+SATCodec.ema_kmeans_iters: 50
+SATCodec.ema_threshold_ema_dead_code: 2
+
+SATDiscriminator.filters: 32
+SATDiscriminator.n_ffts: [1024, 2048, 512, 256, 128]
+SATDiscriminator.hop_lengths: [256, 512, 128, 64, 32]
+SATDiscriminator.win_lengths: [1024, 2048, 512, 256, 128]
+
+# Match the original SAT 1 s scale geometry while keeping the paper's
+# controlled training budget for reproduced baselines.
+batch_size: 24
+val_batch_size: 24
+num_iters: 250000
+train/AudioDataset.duration: 1.0
+val/AudioDataset.duration: 1.0
+
+# Original SAT's AudioSet loader applies random crop/pad only; disable the
+# EMAC augmentation/postprocess chain inherited from conf/base.yml.
+build_transform.preprocess:
+  - Identity
+build_transform.augment_prob: 0.0
+build_transform.augment:
+  - Identity
+build_transform.postprocess:
+  - Identity
+val/build_transform.augment_prob: 0.0
+val/build_transform.preprocess:
+  - Identity
+val/build_transform.augment:
+  - Identity
+val/build_transform.postprocess:
+  - Identity
+
+lambdas:
+  # Match the original SAT generator objective ratio:
+  #   l_f + 0.1*l_t + 3*l_g + 3*l_feat + vq
+  # Here mel/loss is backed by SATFrequencyLoss, matching SAT's l_f.
+  mel/loss: 1.0
+  adv/feat_loss: 3.0
+  adv/gen_loss: 3.0
+  waveform/loss: 0.1
+  # SAT averages its original stage losses over 16 stages.
+  vq/commitment_loss: 0.0625
+  vq/codebook_loss: 0.0

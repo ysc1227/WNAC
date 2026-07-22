@@ -102,6 +102,9 @@ def get_metrics(signal_path, recons_path, state=None):
     output["path"] = signal.path_to_file
     output["recons_path"] = str(recons_path)
     output.update(signal.metadata)
+    for k, v in list(output.items()):
+        if torch.is_tensor(v):
+            output[k] = v.detach().cpu().item()
     return output
 
 @argbind.bind(without_prefix=True)

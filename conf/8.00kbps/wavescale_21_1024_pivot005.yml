@@ -1,0 +1,21 @@
+$include:
+  - conf/8.00kbps/wavescale_13_1024.yml
+
+# Extreme-pivot WNAC, inspired by VAR-style coarse-to-fine token maps.
+#
+# The default 13-stage WNAC schedule has expanded scale sum 9.30:
+#   [1.00, 0.92, 0.84, 0.72, 0.58, 0.44, 0.30,
+#    0.44, 0.58, 0.72, 0.84, 0.92, 1.00]
+#
+# This config lowers the pivot to 0.05 while preserving the same 8kbps token
+# budget.  With use_wavescale=True, the base schedule below expands to 21
+# stages:
+#   [1.00, 0.852, 0.713, 0.585, 0.467, 0.361, 0.267, 0.186, 0.121, 0.073,
+#    0.050,
+#    0.073, 0.121, 0.186, 0.267, 0.361, 0.467, 0.585, 0.713, 0.852, 1.00]
+#
+# Sum(expanded scales)=9.30, so:
+#   44100 / 512 * log2(1024) * 9.30 ~= 8.01 kbps
+EMAC.scale_factor: [0.05, 0.073, 0.121, 0.186, 0.267, 0.361, 0.467, 0.585, 0.713, 0.852, 1.0]
+EMAC.use_wavescale: True
+EMAC.codebook_size: 1024

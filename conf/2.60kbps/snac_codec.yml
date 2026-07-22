@@ -1,0 +1,54 @@
+$include:
+  - conf/base.yml
+
+# Native SNAC-44k reproduction on the EMAC/audiotools training stack.
+#
+# This is the actual SNAC-style backbone, unlike wavescale_5_512_snac44.yml
+# which only matches the SNAC operating-point token budget with a WNAC backbone.
+#
+# Official SNAC labels the 44 kHz checkpoint as 2.6 kbps.  From the exposed
+# token schedule alone, the asymptotic raw rate is:
+#   hop_length = 3 * 3 * 7 * 7 = 441 samples -> 100 latent frames/s
+#   vq_strides = [8, 4, 2, 1] -> scale sum = 1/8 + 1/4 + 1/2 + 1 = 1.875
+#   log2(4096) = 12 bits/token
+#   100 * 1.875 * 12 = 2250 bit/s ~= 2.25 kbps
+# For a 1 s crop, attention padding expands the latent length to 128 frames,
+# giving code lengths [16, 32, 64, 128] and a per-original-second nominal
+# rate of 2.88 kbps.  A 4.x kbps estimate usually means the stage strides were
+# ignored and all four codebooks were counted at full temporal resolution.
+# We keep this file under 2.60kbps to match the official reported operating
+# point, but compute code/token bitrate consistently from the emitted codes.
+generator_model: snac
+
+SNACCodec.sample_rate: 44100
+SNACCodec.encoder_dim: 64
+SNACCodec.encoder_rates: [3, 3, 7, 7]
+SNACCodec.latent_dim: 1024
+SNACCodec.decoder_dim: 1536
+SNACCodec.decoder_rates: [7, 7, 3, 3]
+SNACCodec.codebook_size: 4096
+SNACCodec.codebook_dim: 8
+SNACCodec.vq_strides: [8, 4, 2, 1]
+SNACCodec.noise: true
+SNACCodec.depthwise: true
+SNACCodec.attn_window_size: 32
+SNACCodec.quantizer_dropout: 0.0
+SNACCodec.quantizer_dropout_mode: prefix
+SNACCodec.quantizer_pooling: area
+SNACCodec.quantizer_upsample_mode: repeat
+SNACCodec.quantizer_codebook_update: gradient
+
+Discriminator.sample_rate: 44100
+
+batch_size: 24
+num_iters: 250000
+save_iters: [10000, 50000, 100000, 200000, 300000, 400000]
+train/AudioDataset.duration: 1.0
+
+lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  waveform/loss: 0.1
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0

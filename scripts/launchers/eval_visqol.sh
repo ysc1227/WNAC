@@ -23,7 +23,7 @@ MAX_PAIRS="${MAX_PAIRS:-}"
 echo "[eval_visqol] model=${MODEL} name=${MODEL_NAME}"
 echo "[eval_visqol] input=${INPUT} recons=${RECONS} mode=${MODE} n_proc=${N_PROC} max_pairs=${MAX_PAIRS:-all}"
 
-cmd=(python -m scripts.eval_visqol
+cmd=(python -m scripts.evaluation.visqol
   --input "${INPUT}"
   --output "${RECONS}"
   --mode "${MODE}"

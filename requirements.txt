@@ -1,15 +1,34 @@
+# Core training/runtime
 argbind>=0.3.7
 descript-audiotools>=0.7.2
-einops
-numpy
-torch
-torchaudio==2.8
-tqdm
-tensorboard
-numba>=0.5.7
-jupyterlab
-transformers
-panns_inference
-torcheval
-visqol-python
+einops>=0.8.1
+numpy>=1.26,<2
+torch==2.8.0
+torchvision==0.23.0
+torchaudio==2.8.0
+tqdm>=4.67
+tensorboard>=2.20
+numba>=0.61
+
+# Audio/data processing
+librosa>=0.11
+soundfile>=0.13
+scipy>=1.15
+matplotlib>=3.10
+pandas>=2.2
+pyyaml>=6.0
+
+# AAR conditioning/generation
+transformers>=4.50
+
+# Evaluation metrics
+panns-inference>=0.1.1
+torcheval>=0.0.7
 torchvggish==0.2
+resampy>=0.4.3
+visqol-python[accel]>=0.3
+snac>=1.2.1
+
+# Interactive dev
+jupyterlab>=4.3
+ipykernel>=6.29

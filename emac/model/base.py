@@ -29,6 +29,7 @@ class EMACFile:
     sample_rate: int
     padding: bool
     emac_version: str
+    side_info: object = None
 
     def save(self, path):
         artifacts = {
@@ -43,6 +44,14 @@ class EMACFile:
                 "emac_version": SUPPORTED_VERSIONS[-1],
             },
         }
+        if self.side_info is not None:
+            artifacts["side_info"] = [
+                [
+                    None if center is None else center.cpu().numpy().astype(np.float16)
+                    for center in chunk
+                ]
+                for chunk in self.side_info
+            ]
         path = Path(path).with_suffix(".emac")
         with open(path, "wb") as f:
             np.save(f, artifacts)
@@ -57,12 +66,21 @@ class EMACFile:
             codes = torch.from_numpy(artifacts["codes"].astype(int))
         else:
             codes = [[torch.from_numpy(c.astype(int)) for c in code] for code in codes]
+        side_info = artifacts.get("side_info", None)
+        if side_info is not None:
+            side_info = [
+                [
+                    None if center is None else torch.from_numpy(center.astype(np.float32))
+                    for center in chunk
+                ]
+                for chunk in side_info
+            ]
             
         if artifacts["metadata"].get("emac_version", None) not in SUPPORTED_VERSIONS:
             raise RuntimeError(
                 f"Given file {path} can't be loaded with this version of descript-audio-codec."
             )
-        return cls(codes=codes, **artifacts["metadata"])
+        return cls(codes=codes, side_info=side_info, **artifacts["metadata"])
 
 
 class CodecMixin:
@@ -244,6 +262,16 @@ class CodecMixin:
             self.padding = True
             n_samples = nt
             hop = nt
+        elif getattr(self, "chunk_with_padding", False):
+            # Some codecs, e.g. SAT, define quantizer scales as absolute
+            # per-window frame counts.  They must keep padded convolution
+            # geometry inside each chunk rather than switching to DAC-style
+            # valid-window overlap chunking.
+            self.padding = True
+            n_samples = int(win_duration * self.sample_rate)
+            n_samples = int(math.ceil(n_samples / self.hop_length) * self.hop_length)
+            n_samples = self.adjust_input_length(n_samples, self.attn_window_size) if self.attn_window_size is not None else n_samples
+            hop = n_samples
         else:
             # Chunked inference
             self.padding = False
@@ -264,7 +292,7 @@ class CodecMixin:
 
             audio_data = x.audio_data.to(self.device)
             audio_data = self.preprocess(audio_data, self.sample_rate)
-            _, c, l, _, _, _ = self.encode(audio_data, n_quantizers)
+            _, c, *_ = self.encode(audio_data, n_quantizers)
 
             if isinstance(c, torch.Tensor):
                 codes.append(c.to(original_device))
@@ -337,7 +365,7 @@ class CodecMixin:
         else:
             for code in codes:
                 c = [co.to(self.device) for co in code]
-                z = self.quantizer.from_codes(c, depth=depth)[0]                
+                z = self.quantizer.from_codes(c, depth=depth)[0]
                 r = self.decode(z)
                 recons.append(r.to(original_device))
 
@@ -354,6 +382,14 @@ class CodecMixin:
 
         recons.normalize(obj.input_db)
         resample_fn(obj.sample_rate)
+        if recons.audio_data.shape[-1] < obj.original_length:
+            raise RuntimeError(
+                "Decoded audio is shorter than the encoded file metadata "
+                f"({recons.audio_data.shape[-1]} < {obj.original_length} samples). "
+                "The codes were likely encoded with an incompatible window duration "
+                "for this codec. For SATCodec, re-run encode with WIN_DURATION=1 "
+                "or use the sat_codec launcher preset after this fix."
+            )
         recons = recons[..., : obj.original_length]
         loudness_fn()
 

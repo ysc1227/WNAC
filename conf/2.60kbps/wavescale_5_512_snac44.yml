@@ -1,0 +1,49 @@
+$include:
+  - conf/base.yml
+
+# WNAC 2.6kbps setting matched to the official SNAC 44k operating point.
+#
+# This is not a SNAC backbone reproduction.  SNAC 44k reports 2.6kbps with
+# 4096-entry codebooks and a different encoder/decoder.  This config keeps the
+# existing EMAC backbone fixed and matches the bitrate using a compact
+# 5-stage WNAC schedule.
+#
+# EMAC/WNAC hop_length = prod([2, 4, 8, 8]) = 512, so the latent frame rate is:
+#   44100 / 512 ~= 86.13 Hz
+#
+# With codebook_size=512 (9 bits/token), a 2.6kbps target requires:
+#   effective_scale_sum ~= 2600 / ((44100 / 512) * 9) = 3.353
+#
+# Because use_wavescale=True expands base scales as:
+#   scale_factor[::-1] + scale_factor[1:]
+# this base schedule gives:
+#   [1.0, 0.526, 0.302, 0.526, 1.0]
+# whose sum is 3.354 and bitrate is ~= 2.60kbps.
+EMAC.scale_factor: [0.302, 0.526, 1.0]
+EMAC.use_wavescale: True
+
+EMAC.codebook_size: 512
+EMAC.codebook_dim: 64
+
+# Keep the current EMAC backbone, not SNAC's backbone.
+EMAC.encoder_rates: [2, 4, 8, 8]
+EMAC.decoder_rates: [8, 8, 4, 2]
+EMAC.decoder_dim: 1536
+EMAC.depthwise: True
+EMAC.noise: True
+EMAC.attn_window_size: 32
+
+batch_size: 24
+num_iters: 250000
+EMAC.quantizer_dropout: 0.0
+EMAC.quantizer_dropout_mode: symmetric_shell
+
+train/AudioDataset.duration: 1.0
+
+lambdas:
+  mel/loss: 15.0
+  adv/feat_loss: 2.0
+  adv/gen_loss: 1.0
+  waveform/loss: 0.1
+  vq/commitment_loss: 0.25
+  vq/codebook_loss: 1.0

@@ -16,6 +16,19 @@ from emac.utils import load_model
 warnings.filterwarnings("ignore", category=UserWarning)
 
 
+def _num_quantizers(model) -> int:
+    quantizer = getattr(model, "quantizer", None)
+    if quantizer is not None:
+        if hasattr(quantizer, "quantizers"):
+            return len(quantizer.quantizers)
+        vq = getattr(quantizer, "vq", None)
+        if vq is not None and hasattr(vq, "layers"):
+            return len(vq.layers)
+    if hasattr(model, "n_codebooks"):
+        return int(model.n_codebooks)
+    raise AttributeError(f"Cannot infer quantizer count for {type(model).__name__}")
+
+
 @argbind.bind(group="encode", positional=True, without_prefix=True)
 @torch.inference_mode()
 @torch.no_grad()
@@ -79,7 +92,7 @@ def encode(
     wave = True
     
     total_time = 0
-    codes_counter = [Counter() for _ in range(len(generator.quantizer.quantizers))]
+    codes_counter = [Counter() for _ in range(_num_quantizers(generator))]
     for i in tqdm(range(len(audio_files)), desc="Encoding files"):
         signal = AudioSignal(audio_files[i], sample_rate=sample_rate)
 

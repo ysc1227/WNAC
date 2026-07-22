@@ -1,0 +1,20 @@
+$include:
+  - conf/8.00kbps/wavescale_21_1024_pivot005.yml
+
+# Pure upscale ablation for the 0.05-pivot WNAC schedule.
+#
+# The corresponding WNAC schedule uses use_wavescale=True and expands to 21
+# stages with scale sum 9.30:
+#   [1.00, 0.852, 0.713, 0.585, 0.467, 0.361, 0.267, 0.186, 0.121, 0.073,
+#    0.050,
+#    0.073, 0.121, 0.186, 0.267, 0.361, 0.467, 0.585, 0.713, 0.852, 1.00]
+#
+# This variant keeps the same 21 stages and the same sum(scale_factor)=9.30,
+# but orders them monotonically from the pivot scale to full rate. This isolates
+# the effect of the wavescale downscale-then-upscale ordering from the bitrate
+# and number of RVQ stages.
+#
+#   44100 / 512 * log2(1024) * 9.30 ~= 8.01 kbps
+EMAC.scale_factor: [0.050, 0.063, 0.084, 0.111, 0.143, 0.178, 0.217, 0.258, 0.303, 0.350, 0.398, 0.450, 0.504, 0.560, 0.617, 0.677, 0.738, 0.801, 0.866, 0.932, 1.000]
+EMAC.use_wavescale: False
+EMAC.quantizer_dropout_mode: prefix
